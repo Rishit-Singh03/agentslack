@@ -29,9 +29,8 @@ export function Modal({
     >
       <div className="modal-inner">
         <button className="modal-close icon-button" onClick={close} aria-label="Close dialog">
-          <X size={20} />
+          <X size={14} strokeWidth={1.5} />
         </button>
-        <span className="eyebrow">YOUR TEAM, REIMAGINED</span>
         <h2>{title}</h2>
         <p>{subtitle}</p>
         {children}

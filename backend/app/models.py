@@ -2,14 +2,13 @@ from datetime import datetime, timezone
 from typing import Literal
 
 from sqlalchemy import JSON, Column, String
-from sqlmodel import Field, SQLModel
+from sqlmodel import Field, Relationship, SQLModel
 
 
 def now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-Role = Literal["frontend", "backend", "finance", "design", "research", "ops"]
 Status = Literal["online", "busy", "idle", "offline"]
 TaskStatus = Literal["todo", "in_progress", "review", "done"]
 Priority = Literal["low", "med", "high"]
@@ -17,16 +16,42 @@ Priority = Literal["low", "med", "high"]
 
 class Organization(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
-    name: str
+    name: str = "unnamed"
+    slug: str = "unnamed"
+    tagline: str = ""
+    accent: str = "#3ddc84"
+    theme: str = "dark"
+    density: str = "compact"
+    font_mode: str = "mixed"
+    crt_effects: bool = False
+    initialized: bool = False
+
+
+class UserProfile(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    display_name: str = "You"
+    handle: str = "@you"
+
+
+class Department(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    name: str = Field(unique=True)
+    slug: str = Field(unique=True)
+    description: str = ""
+    color: str = "#3ddc84"
+    channel_id: int = Field(foreign_key="channel.id", unique=True)
+    sort_order: int = 0
+    created_at: datetime = Field(default_factory=now)
 
 
 class Agent(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     handle: str = Field(unique=True, index=True)
     name: str
-    role: Role = Field(sa_type=String)
+    department_id: int | None = Field(default=None, foreign_key="department.id")
+    department: Department | None = Relationship()
     title: str
-    avatar_color: str = "#8b5cf6"
+    avatar_color: str = "#3ddc84"
     status: Status = Field(default="online", sa_type=String)
     level: int = 1
     xp: int = 0
@@ -56,6 +81,7 @@ class Message(SQLModel, table=True):
     author_type: Literal["human", "agent", "system"] = Field(default="human", sa_type=String)
     author_id: int | None = Field(default=None, foreign_key="agent.id")
     body: str
+    is_streaming: bool = False
     thread_parent_id: int | None = Field(default=None, foreign_key="message.id")
     created_at: datetime = Field(default_factory=now)
 

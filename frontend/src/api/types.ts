@@ -1,9 +1,29 @@
-export type Role = 'frontend' | 'backend' | 'finance' | 'design' | 'research' | 'ops'
+export interface Department {
+  id: number
+  name: string
+  slug: string
+  description: string
+  color: string
+  channel_id: number
+  sort_order: number
+  created_at: string
+}
+export interface DepartmentDraft {
+  name: string
+  slug?: string
+  description: string
+  color: string
+  sort_order: number
+}
+export interface DepartmentTemplate extends Omit<DepartmentDraft, 'sort_order'> {
+  slug: string
+  core: boolean
+}
 export interface Agent {
   id: number
   handle: string
   name: string
-  role: Role
+  department_id: number | null
   title: string
   avatar_color: string
   status: 'online' | 'busy' | 'idle' | 'offline'
@@ -28,6 +48,7 @@ export interface Message {
   author_type: 'human' | 'agent' | 'system'
   author_id: number | null
   body: string
+  is_streaming: boolean
   thread_parent_id: number | null
   created_at: string
 }
@@ -41,6 +62,7 @@ export interface Task {
   status: TaskStatus
   priority: 'low' | 'med' | 'high'
   xp_reward: number
+  xp_awarded: boolean
 }
 export interface MemoryEntry {
   id: number
@@ -51,3 +73,34 @@ export type LiveEvent =
   | { type: 'message.created'; data: Message }
   | { type: 'agent.updated'; data: Agent }
   | { type: 'task.updated'; data: Task }
+  | { type: 'message.delta'; data: { id: number; channel_id: number; delta: string } }
+  | { type: 'org.updated'; data: Org }
+  | { type: 'profile.updated'; data: UserProfile }
+  | { type: 'channel.updated'; data: Channel }
+  | { type: 'department.updated'; data: Department }
+  | { type: 'department.deleted'; data: { id: number } }
+  | { type: 'channel.deleted' | 'agent.deleted' | 'task.deleted'; data: { id: number } }
+
+export interface Org {
+  id: number
+  name: string
+  slug: string
+  tagline: string
+  accent: string
+  theme: 'dark' | 'paper'
+  density: 'compact' | 'comfortable'
+  font_mode: 'mixed' | 'mono'
+  crt_effects: boolean
+  initialized: boolean
+}
+export interface UserProfile {
+  id: number
+  display_name: string
+  handle: string
+}
+export interface Activity {
+  id: number
+  time: string
+  text: string
+}
+export type View = 'channel' | 'tasks' | 'agents' | 'activity' | 'settings'

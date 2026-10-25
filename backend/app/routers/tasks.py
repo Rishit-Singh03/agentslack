@@ -38,12 +38,26 @@ async def patch_task(task_id: int, data: TaskPatch, session: Session = Depends(g
     task.sqlmodel_update(changes)
     task.updated_at = now()
     agent = None
+    level_message = None
     if task.status == "done" and not task.xp_awarded:
         agent = require(session, Agent, task.assignee_agent_id)
+        previous_level = agent.level
         agent.xp += task.xp_reward
         agent.level = 1 + agent.xp // 100
         task.xp_awarded = True
         session.add(agent)
+        if agent.level > previous_level:
+            channel_id = task.channel_id
+            if channel_id is None:
+                general = session.exec(select(Channel).where(Channel.name == "general")).first()
+                channel_id = general.id if general else None
+            if channel_id is not None:
+                level_message = Message(
+                    channel_id=channel_id,
+                    author_type="system",
+                    body=f"{agent.handle} level {previous_level} → {agent.level} (+{task.xp_reward}xp)",
+                )
+                session.add(level_message)
     message = None
     if previous != task.status and task.channel_id:
         message = Message(
@@ -62,4 +76,7 @@ async def patch_task(task_id: int, data: TaskPatch, session: Session = Depends(g
     if message:
         session.refresh(message)
         await manager.broadcast("message.created", message)
+    if level_message:
+        session.refresh(level_message)
+        await manager.broadcast("message.created", level_message)
     return task

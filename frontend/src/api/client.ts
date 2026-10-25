@@ -1,4 +1,15 @@
-import type { Agent, Channel, MemoryEntry, Message, Task } from './types'
+import type {
+  Agent,
+  Channel,
+  Department,
+  DepartmentDraft,
+  DepartmentTemplate,
+  MemoryEntry,
+  Message,
+  Org,
+  Task,
+  UserProfile,
+} from './types'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api${path}`, {
@@ -13,10 +24,36 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
         : `Request failed (${response.status}). Please check your input.`,
     )
   }
-  return response.json() as Promise<T>
+  return response.status === 204 ? (undefined as T) : (response.json() as Promise<T>)
 }
 const post = (body: unknown): RequestInit => ({ method: 'POST', body: JSON.stringify(body) })
+const patch = (body: unknown): RequestInit => ({ method: 'PATCH', body: JSON.stringify(body) })
 export const api = {
+  departments: () => request<Department[]>('/departments'),
+  departmentCatalog: () => request<DepartmentTemplate[]>('/departments/catalog'),
+  createDepartment: (body: DepartmentDraft) => request<Department>('/departments', post(body)),
+  updateDepartment: (id: number, body: Partial<DepartmentDraft>) =>
+    request<Department>(`/departments/${id}`, patch(body)),
+  deleteDepartment: (id: number) => request<void>(`/departments/${id}`, { method: 'DELETE' }),
+  org: () => request<Org>('/org'),
+  me: () => request<UserProfile>('/me'),
+  updateOrg: (body: Partial<Org>) => request<Org>('/org', patch(body)),
+  updateMe: (body: Partial<UserProfile>) => request<UserProfile>('/me', patch(body)),
+  onboard: (body: {
+    name: string
+    display_name: string
+    handle: string
+    accent: string
+    sample_team: boolean
+    departments?: DepartmentDraft[]
+  }) => request<Org>('/onboarding', post(body)),
+  createChannel: (body: { name: string; topic: string }) =>
+    request<Channel>('/channels', post(body)),
+  updateChannel: (id: number, body: { name?: string; topic?: string }) =>
+    request<Channel>(`/channels/${id}`, patch(body)),
+  deleteChannel: (id: number) => request<void>(`/channels/${id}`, { method: 'DELETE' }),
+  updateAgent: (id: number, body: Partial<Agent>) => request<Agent>(`/agents/${id}`, patch(body)),
+  deleteAgent: (id: number) => request<void>(`/agents/${id}`, { method: 'DELETE' }),
   agents: () => request<Agent[]>('/agents'),
   channels: () => request<Channel[]>('/channels'),
   channel: (id: number) => request<Channel>(`/channels/${id}`),
@@ -29,7 +66,7 @@ export const api = {
   hire: (body: {
     name: string
     handle: string
-    role: string
+    department_id: number | null
     title: string
     bio: string
     skills: string[]

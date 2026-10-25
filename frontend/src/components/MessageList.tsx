@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
-import type { Agent, Channel, Message as MessageType } from '../api/types'
+import type { Agent, Channel, Department, Message as MessageType, UserProfile } from '../api/types'
+import { utcDate } from '../utils'
 import { Message } from './Message'
 
 export function MessageList({
@@ -9,61 +10,66 @@ export function MessageList({
   profile,
   more,
   loadMore,
+  me,
+  flashes,
+  departments,
 }: {
   messages: MessageType[]
   agents: Agent[]
+  departments: Department[]
   channel: Channel
-  profile: (a: Agent) => void
+  profile: (agent: Agent) => void
   more: boolean
   loadMore: () => void
+  me: UserProfile
+  flashes: number[]
 }) {
   const end = useRef<HTMLDivElement>(null)
-  const previousLast = useRef<number>()
+  const previous = useRef<number>()
+  const last = messages.at(-1)
   useEffect(() => {
-    const last = messages.at(-1)?.id
-    if (last !== previousLast.current)
-      end.current?.scrollIntoView({ behavior: previousLast.current ? 'smooth' : 'auto' })
-    previousLast.current = last
-  }, [messages])
+    if (last?.id !== previous.current || last?.is_streaming)
+      end.current?.scrollIntoView({ block: 'end' })
+    previous.current = last?.id
+  }, [last?.id, last?.body, last?.is_streaming])
   const day = (value: string) =>
-    new Date(value).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })
+    utcDate(value).toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short' })
   return (
     <div className="message-list" role="log" aria-label="Conversation">
-      {more ? (
+      {more && (
         <button className="load-more" onClick={loadMore}>
-          Load older messages
+          [load earlier messages]
         </button>
-      ) : (
-        <div className="channel-welcome">
-          <div className="channel-welcome-icon">{channel.is_dm ? '↗' : '#'}</div>
-          <h1>{channel.is_dm ? channel.name : `Welcome to #${channel.name}`}</h1>
-          <p>
-            {channel.is_dm
-              ? `This is the beginning of your conversation with ${channel.name}. Say hello or share something to work on.`
-              : 'A shared space for your team to think, build, and make things happen.'}
-          </p>
-        </div>
       )}
-      {messages.map((m, i) => {
-        const previous = messages[i - 1]
-        const newDay = !previous || day(previous.created_at) !== day(m.created_at)
+      {!messages.length && (
+        <p className="empty-state">
+          No messages in {channel.is_dm ? channel.name : `#${channel.name}`}. Type below to start a
+          conversation.
+        </p>
+      )}
+      {messages.map((message, index) => {
+        const prior = messages[index - 1]
+        const newDay = !prior || day(prior.created_at) !== day(message.created_at)
         const grouped =
           !newDay &&
-          previous.author_type === m.author_type &&
-          previous.author_id === m.author_id &&
-          new Date(m.created_at).getTime() - new Date(previous.created_at).getTime() < 300000
+          prior.author_id === message.author_id &&
+          prior.author_type === message.author_type &&
+          utcDate(message.created_at).getTime() - utcDate(prior.created_at).getTime() < 300000
         return (
-          <div key={m.id}>
-            {newDay && (
-              <div className="day-divider">
-                <span>{day(m.created_at)}</span>
-              </div>
-            )}
+          <div key={message.id}>
+            {newDay && <div className="day-divider">── {day(message.created_at)} ──</div>}
             <Message
-              message={m}
-              agent={agents.find((a) => a.id === m.author_id)}
+              message={message}
+              department={departments.find(
+                (department) =>
+                  department.id ===
+                  agents.find((agent) => agent.id === message.author_id)?.department_id,
+              )}
+              agent={agents.find((agent) => agent.id === message.author_id)}
               grouped={grouped}
               profile={profile}
+              me={me}
+              flashing={flashes.includes(message.author_id ?? -1)}
             />
           </div>
         )

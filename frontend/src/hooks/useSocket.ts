@@ -11,7 +11,6 @@ export function useSocket(onEvent: (event: LiveEvent) => void, onReconnect: () =
     let disposed = false
     let socket: WebSocket
     let timer: ReturnType<typeof setTimeout>
-    let attempts = 0
     const connect = () => {
       socket = new WebSocket(
         `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`,
@@ -19,7 +18,6 @@ export function useSocket(onEvent: (event: LiveEvent) => void, onReconnect: () =
       socket.onopen = () => {
         if (disposed) return
         setConnected(true)
-        attempts = 0
         reconnect.current()
       }
       socket.onmessage = (event) => {
@@ -30,8 +28,10 @@ export function useSocket(onEvent: (event: LiveEvent) => void, onReconnect: () =
         }
       }
       socket.onclose = () => {
-        setConnected(false)
-        if (!disposed) timer = setTimeout(connect, Math.min(1000 * 2 ** attempts++, 10000))
+        if (!disposed) {
+          setConnected(false)
+          timer = setTimeout(connect, 3000)
+        }
       }
       socket.onerror = () => socket.close()
     }

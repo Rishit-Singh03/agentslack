@@ -1,3 +1,4 @@
+import logging
 import re
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
@@ -13,6 +14,8 @@ from .agents import require
 router = APIRouter(prefix="/api/channels", tags=["messages"])
 pending: dict[int, int] = {}
 original_status: dict[int, str] = {}
+active_channels: dict[int, int] = {}
+logger = logging.getLogger(__name__)
 
 
 async def reply(bind, agent_ids: list[int], message_id: int):
@@ -25,6 +28,7 @@ async def reply(bind, agent_ids: list[int], message_id: int):
             if agent_id not in pending:
                 original_status[agent_id] = agent.status
             pending[agent_id] = pending.get(agent_id, 0) + 1
+            active_channels[message.channel_id] = active_channels.get(message.channel_id, 0) + 1
             agent.status = "busy"
             session.add(agent)
             session.commit()
@@ -41,19 +45,55 @@ async def reply(bind, agent_ids: list[int], message_id: int):
                         ).all()
                     )
                 )
-                body = await get_runtime(agent.runtime).respond(agent, message, context)
+                runtime = get_runtime(agent.runtime)
                 response = Message(
                     channel_id=message.channel_id,
                     author_type="agent",
                     author_id=agent.id,
-                    body=body,
+                    body="",
+                    is_streaming=True,
                     thread_parent_id=message.thread_parent_id,
                 )
                 session.add(response)
                 session.commit()
                 session.refresh(response)
                 await manager.broadcast("message.created", response)
+                try:
+                    if hasattr(runtime, "stream"):
+                        async for chunk in runtime.stream(agent, message, context):
+                            response.body += chunk
+                            await manager.broadcast(
+                                "message.delta",
+                                {
+                                    "id": response.id,
+                                    "channel_id": response.channel_id,
+                                    "delta": chunk,
+                                },
+                            )
+                    else:
+                        # Compatibility with Phase 1 runtimes implementing only respond().
+                        response.body = await runtime.respond(agent, message, context)
+                        await manager.broadcast(
+                            "message.delta",
+                            {
+                                "id": response.id,
+                                "channel_id": response.channel_id,
+                                "delta": response.body,
+                            },
+                        )
+                except Exception:
+                    logger.exception("Runtime failed for agent %s", agent.handle)
+                    response.body += "\n[Runtime failed. Retry the request.]"
+                finally:
+                    response.is_streaming = False
+                    session.add(response)
+                    session.commit()
+                    session.refresh(response)
+                    await manager.broadcast("message.created", response)
             finally:
+                active_channels[message.channel_id] -= 1
+                if not active_channels[message.channel_id]:
+                    del active_channels[message.channel_id]
                 pending[agent_id] -= 1
                 if not pending[agent_id]:
                     del pending[agent_id]

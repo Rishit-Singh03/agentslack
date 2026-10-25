@@ -1,20 +1,20 @@
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from sqlmodel import Session
+from sqlmodel import Session, select
 
-from .db import create_all, engine
+from .db import create_all, engine, get_session
+from .models import Organization
 from .realtime import manager
-from .routers import agents, channels, messages, tasks
-from .seed import seed
+from .routers import agents, channels, departments, messages, settings, tasks
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     create_all()
     with Session(engine) as session:
-        seed(session)
+        settings.ensure_settings(session)
     yield
 
 
@@ -25,13 +25,21 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-for router in (agents.router, channels.router, messages.router, tasks.router):
+for router in (
+    agents.router,
+    channels.router,
+    messages.router,
+    tasks.router,
+    settings.router,
+    departments.router,
+):
     app.include_router(router)
 
 
 @app.get("/api/health")
-def health():
-    return {"status": "ok", "workspace": "Acme Agents"}
+def health(session: Session = Depends(get_session)):
+    org = session.exec(select(Organization)).one()
+    return {"status": "ok", "workspace": org.name}
 
 
 @app.websocket("/ws")

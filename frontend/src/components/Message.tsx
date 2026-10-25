@@ -1,58 +1,59 @@
+import { DepartmentTag, departmentStyle } from './DepartmentTag'
 import ReactMarkdown from 'react-markdown'
-import { Sparkles } from 'lucide-react'
-import type { Agent, Message as MessageType } from '../api/types'
-import { AgentAvatar } from './AgentAvatar'
+import type { Agent, Department, Message as MessageType, UserProfile } from '../api/types'
+import { clockTime } from '../utils'
 
 export function Message({
   message,
   agent,
   grouped,
   profile,
+  me,
+  flashing,
+  department,
 }: {
   message: MessageType
   agent?: Agent
+  department?: Department
   grouped: boolean
-  profile: (a: Agent) => void
+  profile: (agent: Agent) => void
+  me: UserProfile
+  flashing: boolean
 }) {
-  const time = new Date(message.created_at).toLocaleTimeString([], {
-    hour: 'numeric',
-    minute: '2-digit',
-  })
-  if (message.author_type === 'system')
-    return (
-      <div className="system-message">
-        <Sparkles size={13} />
-        <span>{message.body}</span>
-      </div>
-    )
+  const handle =
+    message.author_type === 'human'
+      ? me.handle
+      : (agent?.handle ?? (message.author_type === 'system' ? '--' : '@dismissed'))
   return (
-    <article className={`message ${grouped ? 'grouped' : ''}`}>
-      {!grouped &&
-        (agent ? (
-          <button
-            className="avatar-button"
-            onClick={() => profile(agent)}
-            aria-label={`View ${agent.name}'s profile`}
-          >
-            <AgentAvatar agent={agent} />
-          </button>
-        ) : (
-          <span className="avatar human-avatar">Y</span>
-        ))}
-      {grouped && <span className="compact-time">{time}</span>}
-      <div className="message-content">
+    <article className={`message ${message.author_type === 'system' ? 'system-message' : ''}`}>
+      <time dateTime={message.created_at}>{clockTime(message.created_at)}</time>
+      <div className="message-author">
         {!grouped && (
-          <div className="message-meta">
-            <button onClick={() => agent && profile(agent)} className="author">
-              {agent?.name ?? 'You'}
+          <>
+            <button
+              className={`handle department-handle ${flashing ? 'level-flash' : ''}`}
+              style={departmentStyle(department)}
+              onClick={() => agent && profile(agent)}
+            >
+              {handle}
             </button>
-            {agent && <span className={`role-badge role-${agent.role}`}>{agent.role}</span>}
-            <time dateTime={message.created_at}>{time}</time>
-          </div>
+            {agent && (
+              <small>
+                <DepartmentTag department={department} /> lvl {agent.level}
+              </small>
+            )}
+          </>
         )}
+      </div>
+      <div className="message-body">
         <div className="markdown">
           <ReactMarkdown>{message.body}</ReactMarkdown>
         </div>
+        {message.is_streaming && (
+          <span className="stream-caret" aria-label="Streaming reply">
+            ▍
+          </span>
+        )}
       </div>
     </article>
   )

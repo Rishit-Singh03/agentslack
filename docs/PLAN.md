@@ -1,102 +1,134 @@
-# agentslack — Phase 1 plan: scaffolding + UI
+# agentslack - implementation plan and current model
 
-Goal: a Slack/Teams-style workspace where the "members" are AI agents (specialists:
-frontend, backend, finance, ...) that you assign work to. Agents will later level up and
-keep long-term memory. **Phase 1 is only scaffolding and the UI.** No real agent runtime
-yet: agents reply through a stub so the UI can be exercised end to end.
+The local workspace uses specialist agents organized by user-editable departments.
+Agents have free-text job titles and optional department assignments. There is no
+fixed agent role enum. AI execution remains a local streaming stub.
 
 ## Stack
 
-| Part | Choice |
-|---|---|
-| Backend | Python 3.11, FastAPI, SQLModel on SQLite, managed with `uv` |
-| Realtime | FastAPI WebSocket at `/ws` broadcasting new messages/task updates |
-| Frontend | Vite + React 18 + TypeScript + Tailwind CSS, `fetch` + a small typed API client |
-| Layout | Monorepo: `backend/`, `frontend/`, `docs/` |
+- Python 3.11, FastAPI, SQLModel, SQLite, uv.
+- Vite, React 18, TypeScript, Tailwind, Prettier.
+- WebSocket events at `/ws`; REST routes under `/api`.
+- Terminal-native design follows `DESIGN.md`. Department markers, handles, and tags
+  use their department color; the rest of the chrome uses the org accent and status tokens.
 
-## Backend (`backend/`)
+## Data model
 
-```
-backend/
-  pyproject.toml            # uv project; deps: fastapi, uvicorn[standard], sqlmodel, pydantic-settings
-  app/
-    main.py                 # FastAPI app, CORS for http://localhost:5173, routers, startup seeds DB
-    config.py               # pydantic-settings: DATABASE_URL (default sqlite:///./agentslack.db), RELAY_KEY (optional)
-    db.py                   # engine, session dependency, create_all
-    models.py               # SQLModel tables (below)
-    schemas.py              # request/response models where they differ from tables
-    seed.py                 # idempotent seed: org, channels, agents, a few messages, tasks
-    realtime.py             # WebSocket connection manager (broadcast JSON events)
-    routers/  agents.py channels.py messages.py tasks.py
-    runtime/
-      base.py               # AgentRuntime protocol: async def respond(agent, message, context) -> str
-      stub.py               # StubRuntime: canned in-character reply after a short delay
-  tests/test_api.py         # pytest + httpx TestClient smoke tests
-```
+- **Organization**: name, derived slug, tagline, accent, theme, density, font mode,
+  optional CRT effects, initialized flag. Single org for now.
+- **UserProfile**: display name and handle; single local user.
+- **Department**: id, name, slug, description, hex color, channel_id, sort_order,
+  created_at. Names/slugs are unique; each department owns one non-DM channel.
+  Colors support neutrals and green/amber/cyan/blue/warm hues; the excluded hue
+  band is validated on create and update.
+- **Agent**: id, handle, name, nullable department_id, free-text title, avatar color
+  metadata, status, level, XP, skills, bio, runtime, created_at. Null department means
+  unassigned. Membership follows assignment; moving departments removes the old
+  department membership and adds the new one.
+- **Channel**: id, name, topic, is_dm, dm_agent_id, created_at.
+  **ChannelMember** links agents to shared and department channels.
+- **Message**: channel, human/agent/system author, body, optional thread parent,
+  created_at, is_streaming. Deltas are transient; final bodies are persisted.
+- **Task**: title, description, assignee, optional channel, status, priority,
+  XP reward, one-time XP flag, timestamps. Level is `1 + xp // 100`.
+- **MemoryEntry**: placeholder facts, lessons, and preferences; no learning harness yet.
 
-### Data model
-- **Agent**: id, handle (`@fiona`), name, role (`frontend|backend|finance|design|research|ops`),
-  title, avatar_color, status (`online|busy|idle|offline`), level (int), xp (int),
-  skills (JSON list of str), bio, runtime (str, default `"stub"`), created_at.
-- **Channel**: id, name (`general`, `frontend`, `backend`, `finance`), topic, is_dm (bool),
-  dm_agent_id (nullable), created_at. Membership: `ChannelMember(channel_id, agent_id)`.
-- **Message**: id, channel_id, author_type (`human|agent|system`), author_id (nullable for
-  human), body (markdown text), thread_parent_id (nullable), created_at.
-- **Task**: id, title, description, assignee_agent_id, channel_id (nullable), status
-  (`todo|in_progress|review|done`), priority (`low|med|high`), xp_reward (int), created_at, updated_at.
-- **MemoryEntry** (placeholder for later): id, agent_id, kind (`fact|lesson|preference`), content, created_at.
+## Department catalog and workspace fundamentals
 
-### API (all under `/api`)
-- `GET /health`
-- `GET/POST /agents`, `GET/PATCH /agents/{id}`, `GET /agents/{id}/memory`
-- `GET/POST /channels`, `GET /channels/{id}`, `POST /dms/{agent_id}` (get-or-create DM channel)
-- `GET /channels/{id}/messages?before=&limit=`, `POST /channels/{id}/messages`
-  - After a human posts, for each agent @mentioned (or the DM agent), schedule a background
-    task: StubRuntime reply -> save Message -> broadcast. Set agent status busy while it is "thinking".
-- `GET/POST /tasks`, `PATCH /tasks/{id}` (moving to `done` awards `xp_reward` to the assignee;
-  level = 1 + xp // 100) and posts a system message in the task's channel.
-- `WS /ws`: events `{type: "message.created"|"task.updated"|"agent.updated", data: {...}}`.
+`backend/app/catalog.py` is the catalog source, served at `/api/departments/catalog`.
+Core departments (preselected during setup): Leadership, Operations, Finance,
+People (HR), Product, Engineering, Marketing, Sales.
+Optional departments: Design, Legal, Customer Support, Research, Data & Analytics.
+Each has a one-line description and an allowed default color. Users can add custom
+names, descriptions, colors, and ordering. Core departments can also be edited or removed.
 
-## Frontend (`frontend/`)
+Every new workspace gets these channels, even with no departments or agents:
 
-Slack-like three-column layout, dark theme by default (light theme toggle), responsive.
+| Channel | Purpose |
+| --- | --- |
+| #general | Company-wide discussion and updates |
+| #announcements | Official decisions and milestones |
+| #standup | Daily progress, priorities, and blockers |
+| #requests | Work intake across departments |
+| #random | Informal conversation |
 
-- **Left sidebar**: workspace name + switcher placeholder; sections "Channels" (with `#`),
-  "Direct messages" (agent avatars with status dot), "Tasks" link, "Agents" directory link,
-  "+ Hire agent" button (opens modal -> POST /agents).
-- **Center**: channel header (name, topic, member avatars); message list grouped by author
-  and day, markdown rendering, agent role badges, "typing..." indicator when an agent is busy;
-  composer with `@mention` autocomplete for agents, Enter to send, Shift+Enter newline.
-- **Right panel** (collapsible): clicking an agent opens a profile: avatar, title, role,
-  level + XP progress bar, skills chips, current tasks, memory (empty-state placeholder).
-- **Tasks view**: kanban board (todo / in progress / review / done), create task modal with
-  assignee picker; drag or a status dropdown to move cards.
-- **Agents view**: directory grid of agent cards.
-- Live updates via the `/ws` socket; Vite dev server proxies `/api` and `/ws` to `localhost:8000`.
+Each selected department adds `#slug`. Reserved org-wide slugs cannot be used for
+departments. Department rename updates its channel name; description changes update
+its topic. Remove a department to delete its channel and messages, unassign its agents,
+and keep tasks with a null channel. #general is always protected. Direct channel deletion
+or renaming of a department channel is rejected; use department settings instead.
 
-```
-frontend/src/
-  api/client.ts  api/types.ts  hooks/useSocket.ts
-  components/  Sidebar, ChannelView, MessageList, Message, Composer, AgentProfile,
-               AgentAvatar, TaskBoard, TaskCard, HireAgentModal, CreateTaskModal
-  pages/ (or a simple view state)  App.tsx  main.tsx  index.css
-```
+## Onboarding and sample data
 
-## Seed data
-Org "Acme Agents". Agents: Fiona (frontend), Bruno (backend), Penny (finance),
-Dex (design), Remy (research), Opal (ops), with varied levels/xp/statuses.
-Channels: #general, #frontend, #backend, #finance. A handful of messages and 5–6 tasks.
+A fresh database is uninitialized. Step 1 collects org/user identity, accent, and sample
+team versus empty workspace. Step 2 offers the catalog checkboxes and a custom-department
+form. Nothing is seeded before initialization is submitted. Both choices create the five
+org-wide channels and the selected department channels.
 
-## Dev workflow
-- `cd backend && uv run uvicorn app.main:app --reload` (port 8000)
-- `cd frontend && npm install && npm run dev` (port 5173)
-- Root README documents both, plus `.env.example` with `RELAY_KEY=` and `DATABASE_URL=`.
+Sample mode adds one agent per selected core department (eight with default choices):
 
-## Out of scope for phase 1
-Real LLM harnesses (pi / DeepSeek / others plug in via `runtime/base.py` later), auth,
-multi-user, persistent agent memory logic, file uploads.
+| Department | Name | Title |
+| --- | --- | --- |
+| Leadership | Alice | Chief of Staff |
+| Operations | Omar | Operations Manager |
+| Finance | Nina | Finance Analyst |
+| People (HR) | Maya | People Partner |
+| Product | Leo | Product Manager |
+| Engineering | Evan | Software Engineer |
+| Marketing | Zoe | Marketing Lead |
+| Sales | Ben | Account Executive |
+
+Skills and stub replies reflect department responsibilities. Eight sample tasks cover
+company fundamentals and are spread across department channels and #requests. Deselected
+core departments do not receive sample agents/tasks. Optional and custom departments start
+without agents until a user hires one. Empty mode creates no agents, messages, or tasks.
+
+## API and events
+
+- `GET /health`; `GET/PATCH /org`; `GET/PATCH /me`; `POST /onboarding`.
+- `GET /departments/catalog`; `GET/POST /departments`;
+  `PATCH/DELETE /departments/{id}`.
+- `GET/POST /agents`; `GET/PATCH/DELETE /agents/{id}`; `GET /agents/{id}/memory`.
+- `GET/POST /channels`; `GET/PATCH/DELETE /channels/{id}`; `POST /dms/{agent_id}`.
+- `GET /channels/{id}/messages?before=&limit=`; `POST /channels/{id}/messages`.
+- `GET/POST /tasks`; `PATCH /tasks/{id}`.
+
+Events: `department.updated/deleted`, `org.updated`, `profile.updated`,
+`channel.updated/deleted`, `agent.updated/deleted`, `task.updated/deleted`,
+`message.created`, and `message.delta`. Mentions and DMs invoke the runtime registry.
+The stub streams department-aware text and restores agent status after completion or error.
+
+## Frontend
+
+- Sidebar separates shared CHANNELS, colored DEPARTMENTS, and DIRECT messages.
+- Agent directory groups entries by department with an explicit Unassigned group.
+- Hire and edit forms use a department dropdown plus a free-text title.
+- Settings include department add, rename, description, color, reorder, and confirmed removal.
+  The appearance preview is a sample announcement row using the current accent/font/density.
+- IRC-style messages, streamed caret, status line, profile/channel panes, task board,
+  command palette, slash commands, activity log, level-up feedback, and keyboard shortcuts
+  remain available. Sidebar shortcut hints use bracketed notation.
+
+## Existing database upgrade
+
+The startup upgrade preserves existing agents, XP, task IDs, and conversation history.
+Legacy role mapping: frontend/backend -> Engineering, finance -> Finance,
+design -> Design, research -> Research, ops -> Operations. The old role column is
+removed and department_id is added. Legacy frontend/backend/ops channel histories,
+tasks, and members move to the matching department channel; already matching channels
+are reused. Missing org-wide channels are added to initialized workspaces. Upgrades are
+idempotent and tested on a file-backed SQLite database with foreign keys enabled.
 
 ## Acceptance
-- `uv run pytest` passes; `npm run build` and `npm run lint`/`tsc` pass.
-- Both servers start; UI loads seeded workspace; posting `@bruno hi` in #backend shows a
-  typing indicator then a stub reply live; creating and completing a task updates XP/level.
+
+Backend: `uv run pytest`, `uv run ruff check`, `uv run ruff format --check`.
+Frontend: `npm run lint`, `npm run format:check`, `npm run build`, `npm run smoke`.
+Tests cover CRUD, catalog, selected/custom/empty onboarding, assignment/unassignment,
+department-aware replies, color and reserved-slug validation, deletion references,
+role migration, streaming, XP, settings, and socket events.
+
+The browser smoke script uses isolated servers/data and refreshes screenshots including
+both onboarding steps, the workspace, grouped agents, and department settings.
+
+Out of scope: auth, multi-user access control, real LLM execution, uploads, persistent
+learning, and multi-process runtime coordination. Do not commit without explicit instruction.

@@ -1,50 +1,66 @@
-import type { Agent, Task, TaskStatus } from '../api/types'
-import { AgentAvatar } from './AgentAvatar'
+import { departmentStyle } from './DepartmentTag'
+import type { Agent, Department, Task, TaskStatus } from '../api/types'
 
-export const stages: { id: TaskStatus; label: string; color: string }[] = [
-  { id: 'todo', label: 'To do', color: '#92909d' },
-  { id: 'in_progress', label: 'In progress', color: '#a78bfa' },
-  { id: 'review', label: 'In review', color: '#fbbf24' },
-  { id: 'done', label: 'Done', color: '#34d399' },
+export const stages: { id: TaskStatus; label: string }[] = [
+  { id: 'todo', label: 'TODO' },
+  { id: 'in_progress', label: 'IN PROGRESS' },
+  { id: 'review', label: 'REVIEW' },
+  { id: 'done', label: 'DONE' },
 ]
 export function TaskCard({
   task,
+  departments,
   agent,
   move,
   profile,
 }: {
   task: Task
+  departments: Department[]
   agent?: Agent
   move: (id: number, status: TaskStatus) => void
-  profile: (a: Agent) => void
+  profile: (agent: Agent) => void
 }) {
   return (
-    <article className="task-card">
-      <div className="task-topline">
-        <span className={`priority ${task.priority}`}>
-          {task.priority === 'med' ? 'Medium' : task.priority} priority
-        </span>
+    <article
+      className="task-card"
+      tabIndex={0}
+      aria-label={`Task ${task.title}`}
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget || !['h', 'l'].includes(event.key)) return
+        event.preventDefault()
+        const index = stages.findIndex((stage) => stage.id === task.status)
+        move(
+          task.id,
+          stages[Math.max(0, Math.min(stages.length - 1, index + (event.key === 'l' ? 1 : -1)))].id,
+        )
+      }}
+    >
+      <div className="task-meta">
         <span>#{String(task.id).padStart(3, '0')}</span>
+        <span>[{task.priority}]</span>
       </div>
       <h3>{task.title}</h3>
       <p>{task.description}</p>
       <div className="task-assignee">
-        {agent && (
-          <button onClick={() => profile(agent)}>
-            <AgentAvatar agent={agent} size={24} />
-            {agent.name}
-          </button>
-        )}
-        <span className="xp-reward">✧ {task.xp_reward} XP</span>
+        <button
+          className="handle department-handle"
+          style={departmentStyle(
+            departments.find((department) => department.id === agent?.department_id),
+          )}
+          onClick={() => agent && profile(agent)}
+        >
+          {agent?.handle ?? 'unassigned'}
+        </button>
+        <span>+{task.xp_reward}xp</span>
       </div>
       <select
         aria-label={`Status of ${task.title}`}
         value={task.status}
-        onChange={(e) => move(task.id, e.target.value as TaskStatus)}
+        onChange={(event) => move(task.id, event.target.value as TaskStatus)}
       >
-        {stages.map((s) => (
-          <option key={s.id} value={s.id}>
-            {s.label}
+        {stages.map((stage) => (
+          <option key={stage.id} value={stage.id}>
+            {stage.label}
           </option>
         ))}
       </select>

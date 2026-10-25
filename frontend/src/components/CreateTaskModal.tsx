@@ -40,22 +40,21 @@ export function CreateTaskModal({
   }
   return (
     <Modal
-      title="Let's make it happen."
-      subtitle="Give an idea a name, a teammate, and a place to start."
+      title="new task"
+      subtitle="Assign work to an agent and choose a channel for updates."
       close={close}
     >
       <form onSubmit={submit}>
+        {!agents.length && (
+          <p className="form-error">No agents available. Hire an agent before creating a task.</p>
+        )}
         <label>
           Task title
-          <input name="title" required maxLength={200} placeholder="What needs to get done?" />
+          <input name="title" required maxLength={200} placeholder="Task title" />
         </label>
         <label>
           Description
-          <textarea
-            name="description"
-            rows={3}
-            placeholder="Share a little context with your teammate…"
-          />
+          <textarea name="description" rows={3} placeholder="Scope and acceptance criteria" />
         </label>
         <div className="form-row">
           <label>
@@ -63,7 +62,7 @@ export function CreateTaskModal({
             <select name="agent" required>
               {agents.map((a) => (
                 <option key={a.id} value={a.id}>
-                  {a.name} · {a.role}
+                  {a.name} · {a.title}
                 </option>
               ))}
             </select>
@@ -90,7 +89,7 @@ export function CreateTaskModal({
               ))}
           </select>
         </label>
-        <div className="modal-note">✧ Completing this task awards your teammate 25 XP.</div>
+        <div className="modal-note">Completion awards 25xp once per task.</div>
         {error && (
           <p role="alert" className="form-error">
             {error}
@@ -100,7 +99,7 @@ export function CreateTaskModal({
           <button type="button" className="secondary-button" onClick={close}>
             Cancel
           </button>
-          <button className="primary-button" disabled={busy}>
+          <button className="primary-button" disabled={busy || !agents.length}>
             {busy ? 'Creating…' : 'Create task'}
           </button>
         </div>

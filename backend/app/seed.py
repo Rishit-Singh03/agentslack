@@ -1,178 +1,166 @@
 from sqlmodel import Session, select
 
-from .models import Agent, Channel, ChannelMember, Message, Organization, Task
+from .catalog import DEPARTMENT_CATALOG
+from .departments import create_department, ensure_org_channels, sync_agent_membership
+from .models import Agent, Channel, Department, Message, Organization, Task
+from .schemas import DepartmentCreate
+
+SAMPLE_TEAM = [
+    ("Alice", "leadership", "Chief of Staff", ["Strategy", "Planning", "Decision briefs"], 245),
+    (
+        "Omar",
+        "operations",
+        "Operations Manager",
+        ["Processes", "Delivery", "Resource planning"],
+        380,
+    ),
+    ("Nina", "finance", "Finance Analyst", ["Forecasting", "Budgets", "Financial reporting"], 170),
+    ("Maya", "people", "People Partner", ["Hiring", "Onboarding", "People policies"], 290),
+    ("Leo", "product", "Product Manager", ["Discovery", "Prioritization", "Roadmaps"], 125),
+    ("Evan", "engineering", "Software Engineer", ["Software systems", "APIs", "Testing"], 420),
+    ("Zoe", "marketing", "Marketing Lead", ["Positioning", "Campaigns", "Content"], 220),
+    ("Ben", "sales", "Account Executive", ["Accounts", "Proposals", "Negotiation"], 80),
+]
+
+SAMPLE_TASKS = [
+    (
+        "Prepare the weekly decision brief",
+        "Summarize priorities, open decisions, and owners for leadership review.",
+        "leadership",
+        "review",
+        "high",
+    ),
+    (
+        "Document the request intake process",
+        "Define triage, ownership, and response expectations for shared requests.",
+        "operations",
+        "in_progress",
+        "high",
+    ),
+    (
+        "Update the quarterly forecast",
+        "Review spending assumptions and provide a forecast with risks and scenarios.",
+        "finance",
+        "todo",
+        "med",
+    ),
+    (
+        "Review the new-hire checklist",
+        "Confirm access, introductions, and first-week responsibilities for new hires.",
+        "people",
+        "review",
+        "med",
+    ),
+    (
+        "Prioritize customer requests",
+        "Group incoming feedback by impact and recommend the next product priorities.",
+        "product",
+        "todo",
+        "high",
+    ),
+    (
+        "Review service reliability",
+        "Check error trends, test coverage, and the next reliability improvements.",
+        "engineering",
+        "in_progress",
+        "med",
+    ),
+    (
+        "Draft the campaign brief",
+        "Outline the audience, message, channels, and success metrics for the next campaign.",
+        "marketing",
+        "todo",
+        "med",
+    ),
+    (
+        "Update account next steps",
+        "Record owners, customer questions, and follow-up dates for active opportunities.",
+        "sales",
+        "done",
+        "med",
+    ),
+]
 
 
-def seed(session: Session):
-    if session.exec(select(Organization)).first():
+def seed(session: Session, commit: bool = True):
+    if session.exec(select(Agent)).first():
         return
-    session.add(Organization(name="Acme Agents"))
-    people = [
-        (
-            "Fiona",
-            "frontend",
-            "Frontend engineer",
-            "#a78bfa",
-            245,
-            ["React", "TypeScript", "Accessibility"],
-        ),
-        ("Bruno", "backend", "Backend engineer", "#60a5fa", 380, ["Python", "APIs", "Databases"]),
-        (
-            "Penny",
-            "finance",
-            "Financial strategist",
-            "#fbbf24",
-            170,
-            ["Forecasting", "Budgets", "Analysis"],
-        ),
-        (
-            "Dex",
-            "design",
-            "Product designer",
-            "#f472b6",
-            290,
-            ["UI/UX", "Design systems", "Prototyping"],
-        ),
-        (
-            "Remy",
-            "research",
-            "Research specialist",
-            "#34d399",
-            125,
-            ["Research", "Synthesis", "Strategy"],
-        ),
-        ("Opal", "ops", "Operations lead", "#fb923c", 420, ["Planning", "Operations", "Delivery"]),
-    ]
-    agents = []
-    for i, (name, role, title, color, xp, skills) in enumerate(people):
+    if not session.exec(select(Organization)).first():
+        session.add(Organization(name="Acme Agents", slug="acme-agents", initialized=True))
+        ensure_org_channels(session)
+        for index, template in enumerate(DEPARTMENT_CATALOG):
+            if template["core"]:
+                create_department(session, DepartmentCreate(**template, sort_order=index))
+    ensure_org_channels(session)
+    departments = {item.slug: item for item in session.exec(select(Department)).all()}
+    channels = {item.name: item for item in session.exec(select(Channel)).all()}
+    people = {}
+    for name, slug, title, skills, xp in SAMPLE_TEAM:
+        department = departments.get(slug)
+        if department is None:
+            continue
         agent = Agent(
-            handle=f"@{name.lower()}",
             name=name,
-            role=role,
+            handle=f"@{name.lower()}",
+            department_id=department.id,
             title=title,
-            avatar_color=color,
+            skills=skills,
             xp=xp,
             level=1 + xp // 100,
-            skills=skills,
-            status="idle" if i == 4 else "online",
-            bio=(
-                f"Your dedicated {role} teammate. "
-                "Here to turn ambitious ideas into thoughtful, useful work."
-            ),
+            status="idle" if slug == "product" else "online",
+            bio=f"{title}. Handles {department.name.lower()} work and shared requests.",
         )
         session.add(agent)
-        agents.append(agent)
-    session.flush()
-    channels = []
-    for name, topic in [
-        ("general", "The big picture, small wins, and everything in between."),
-        ("frontend", "Interfaces that feel as good as they work."),
-        ("backend", "APIs, architecture, and the engine behind it all."),
-        ("finance", "Making every number count."),
-    ]:
-        channel = Channel(name=name, topic=topic)
-        session.add(channel)
         session.flush()
-        channels.append(channel)
-        for agent in agents:
-            if name == "general" or agent.role == name:
-                session.add(ChannelMember(channel_id=channel.id, agent_id=agent.id))
-    session.add(
-        Message(
-            channel_id=channels[0].id,
-            author_type="system",
-            body="Welcome to Acme Agents. Your next great idea starts here.",
-        )
-    )
-    for agent, body in [
-        (
-            agents[5],
-            "Morning, team! 👋 Our workspace is ready. "
-            "Share an idea, assign a task, or say hello to your new teammates.",
-        ),
-        (
-            agents[0],
-            "Ready to build something great. "
-            "I'll be in **#frontend** if you need a hand with the interface.",
-        ),
-        (agents[1], "Backend is all set. Mention **@bruno** in a channel and I'll jump in."),
-        (agents[3], "A little craft goes a long way. Let's make something people love. ✨"),
-    ]:
-        session.add(
-            Message(channel_id=channels[0].id, author_type="agent", author_id=agent.id, body=body)
-        )
-    for index, channel in enumerate(channels[1:]):
+        sync_agent_membership(session, agent)
+        people[slug] = agent
         session.add(
             Message(
-                channel_id=channel.id,
+                channel_id=department.channel_id,
                 author_type="agent",
-                author_id=agents[index].id,
-                body=f"Welcome to **#{channel.name}**! What should we work on first?",
+                author_id=agent.id,
+                body=(
+                    f"{department.name}: {department.description} "
+                    f"Mention {agent.handle} to request a response."
+                ),
             )
         )
-    task_seeds = [
-        (
-            "Build the workspace shell",
-            "Implement responsive channel navigation, the conversation layout, and an accessible "
-            "message composer in React.",
-            0,
-            "in_progress",
-            "high",
-        ),
-        (
-            "Define the API contracts",
-            "Document request and response schemas for agents, channels, messages, and tasks, "
-            "including validation errors and pagination.",
-            1,
-            "review",
-            "high",
-        ),
-        (
-            "Draft Q4 budget forecast",
-            "Estimate infrastructure and future model costs, compare usage scenarios, and flag "
-            "the assumptions with the biggest effect on the budget.",
-            2,
-            "todo",
-            "med",
-        ),
-        (
-            "Explore the visual direction",
-            "Propose a cohesive palette, typography, and component treatments for the workspace "
-            "with accessible contrast in both themes.",
-            3,
-            "review",
-            "med",
-        ),
-        (
-            "Research collaboration patterns",
-            "Compare how teams coordinate work through channels and task boards, then summarize "
-            "patterns that could make agent collaboration easier to follow.",
-            4,
-            "todo",
-            "low",
-        ),
-        (
-            "Set up the team workspace",
-            "Organize the starter channels, introduce each specialist, and define a simple "
-            "routine for assigning tasks and sharing progress.",
-            5,
-            "done",
-            "med",
-        ),
-    ]
-    channels_by_name = {channel.name: channel for channel in channels}
-    for title, description, index, status, priority in task_seeds:
-        agent = agents[index]
-        channel = channels_by_name.get(agent.role, channels_by_name["general"])
+    session.add(
+        Message(
+            channel_id=channels["general"].id,
+            author_type="system",
+            body="Workspace initialized. Use #requests for cross-department work.",
+        )
+    )
+    for slug in ("leadership", "operations", "product", "engineering"):
+        agent = people.get(slug)
+        if agent:
+            session.add(
+                Message(
+                    channel_id=channels["general"].id,
+                    author_type="agent",
+                    author_id=agent.id,
+                    body=(
+                        f"{agent.title} here. Department updates are in #{departments[slug].slug}; "
+                        "shared work goes in #requests."
+                    ),
+                )
+            )
+    for index, (title, description, slug, status, priority) in enumerate(SAMPLE_TASKS):
+        agent = people.get(slug)
+        if agent is None:
+            continue
+        channel_id = channels["requests"].id if index in (1, 4, 7) else departments[slug].channel_id
         session.add(
             Task(
                 title=title,
                 description=description,
                 assignee_agent_id=agent.id,
-                channel_id=channel.id,
+                channel_id=channel_id,
                 status=status,
                 priority=priority,
                 xp_awarded=status == "done",
             )
         )
-    session.commit()
+    if commit:
+        session.commit()

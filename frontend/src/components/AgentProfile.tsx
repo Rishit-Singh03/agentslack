@@ -1,134 +1,166 @@
+import { DepartmentTag, departmentStyle } from './DepartmentTag'
 import { useEffect, useState } from 'react'
-import { Brain, MessageSquare, X, Sparkles } from 'lucide-react'
 import { api } from '../api/client'
-import type { Agent, MemoryEntry, Task } from '../api/types'
-import { AgentAvatar } from './AgentAvatar'
+import type { Agent, Department, MemoryEntry, Task } from '../api/types'
+import { AgentEditForm } from './AgentEditForm'
 
 export function AgentProfile({
   agent,
   tasks,
   close,
   dm,
+  changed,
+  dismissed,
+  departments,
 }: {
   agent: Agent
+  departments: Department[]
   tasks: Task[]
   close: () => void
-  dm: (a: Agent) => void
+  dm: (agent: Agent) => void
+  changed: (agent: Agent) => void
+  dismissed: (id: number) => void
 }) {
   const [memory, setMemory] = useState<MemoryEntry[]>([])
-  const [memoryError, setMemoryError] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [confirm, setConfirm] = useState(false)
+  const [error, setError] = useState('')
   useEffect(() => {
+    setEditing(false)
+    setConfirm(false)
+    setError('')
     let alive = true
-    setMemory([])
-    setMemoryError(false)
     api
       .memory(agent.id)
-      .then((m) => {
-        if (alive) setMemory(m)
+      .then((entries) => {
+        if (alive) setMemory(entries)
       })
       .catch(() => {
-        if (alive) setMemoryError(true)
+        if (alive) setError('Memory unavailable')
       })
     return () => {
       alive = false
     }
   }, [agent.id])
+  const dismiss = async () => {
+    try {
+      await api.deleteAgent(agent.id)
+      dismissed(agent.id)
+      close()
+    } catch (error) {
+      setError((error as Error).message)
+    }
+  }
+  const department = departments.find((item) => item.id === agent.department_id)
+  const active = tasks.filter(
+    (task) => task.assignee_agent_id === agent.id && task.status !== 'done',
+  )
   return (
-    <aside className="profile">
-      <div className="profile-heading">
-        Agent profile
-        <button className="icon-button" onClick={close} aria-label="Close profile">
-          <X size={18} />
+    <aside className="info-pane">
+      <header>
+        <h2>agent / {agent.handle}</h2>
+        <button onClick={close} aria-label="Close profile">
+          [x]
         </button>
-      </div>
-      <div className="profile-scroll">
-        <div className="profile-identity">
-          <AgentAvatar agent={agent} size={80} />
-          <h2>
-            {agent.name}
-            <Sparkles size={16} />
-          </h2>
-          <p>{agent.title}</p>
-          <span className="profile-status">
-            <span className={`inline-dot ${agent.status}`} />
-            {agent.status === 'busy' ? 'Thinking' : agent.status}
-          </span>
-          <button className="primary-button" onClick={() => dm(agent)}>
-            <MessageSquare size={15} />
-            Message {agent.name}
-          </button>
-        </div>
-        <section className="profile-section">
-          <h3>ABOUT</h3>
-          <p>{agent.bio || 'A new teammate, ready to help with your next big idea.'}</p>
-          <span className={`role-badge role-${agent.role}`}>{agent.role}</span>
-          <span className="runtime-tag">Stub runtime</span>
+      </header>
+      <div className="pane-scroll">
+        <section>
+          <h3 className="handle department-handle" style={departmentStyle(department)}>
+            {agent.handle}
+          </h3>
+          <p>
+            {agent.name} - {agent.title}
+          </p>
+          <p className={`status ${agent.status}`}>
+            ● {agent.status} <DepartmentTag department={department} />
+          </p>
+          <div className="pane-actions">
+            <button onClick={() => dm(agent)}>[message]</button>
+            <button onClick={() => setEditing(!editing)}>
+              [{editing ? 'cancel edit' : 'edit'}]
+            </button>
+          </div>
         </section>
-        <section className="profile-section">
-          <h3>GROWING WITH YOU</h3>
-          <div className="level-row">
-            <span className="level-icon">✧</span>
-            <div>
-              <strong>Level {agent.level}</strong>
-              <small>{agent.xp} lifetime XP</small>
-            </div>
-            <span>{agent.xp % 100}/100 XP</span>
-          </div>
+        {editing && (
+          <AgentEditForm
+            key={agent.id}
+            agent={agent}
+            departments={departments}
+            saved={(updated) => {
+              changed(updated)
+              setEditing(false)
+            }}
+          />
+        )}
+        <section>
+          <h3>ABOUT</h3>
+          <p>{agent.bio || 'No bio set.'}</p>
+          <p className="dim">runtime: {agent.runtime}</p>
+        </section>
+        <section>
+          <h3>PROGRESS</h3>
+          <p>
+            lvl {agent.level} / {agent.xp}xp
+          </p>
           <div className="xp-track">
-            <div style={{ width: `${agent.xp % 100}%` }} />
+            <span style={{ width: `${agent.xp % 100}%` }} />
           </div>
-          <p className="muted-small">
-            {100 - (agent.xp % 100)} XP to level {agent.level + 1}. Great work adds up.
+          <p className="dim">
+            {100 - (agent.xp % 100)}xp to lvl {agent.level + 1}
           </p>
         </section>
-        <section className="profile-section">
-          <h3>SUPERPOWERS</h3>
-          <div className="skill-list">
-            {agent.skills.length ? (
-              agent.skills.map((s) => <span key={s}>{s}</span>)
-            ) : (
-              <p>Skills will appear here.</p>
-            )}
-          </div>
+        <section>
+          <h3>SKILLS</h3>
+          <p>
+            {agent.skills.length
+              ? agent.skills.map((skill) => `[${skill}]`).join(' ')
+              : 'No skills set.'}
+          </p>
         </section>
-        <section className="profile-section">
-          <h3>
-            CURRENT TASKS{' '}
-            <span>
-              {tasks.filter((t) => t.assignee_agent_id === agent.id && t.status !== 'done').length}
-            </span>
-          </h3>
-          {tasks
-            .filter((t) => t.assignee_agent_id === agent.id && t.status !== 'done')
-            .map((t) => (
-              <div className="profile-task" key={t.id}>
-                <span className="tiny-dot" />
-                {t.title}
-                <small>{t.status.replace('_', ' ')}</small>
-              </div>
-            ))}
-          {!tasks.some((t) => t.assignee_agent_id === agent.id && t.status !== 'done') && (
-            <p className="muted-small">All clear. Ready for a new challenge.</p>
-          )}
+        <section>
+          <h3>CURRENT TASKS ({active.length})</h3>
+          {active.map((task) => (
+            <p className="profile-task" key={task.id}>
+              #{task.id} {task.title}
+              <small>{task.status}</small>
+            </p>
+          ))}
+          {!active.length && <p className="dim">No active tasks.</p>}
         </section>
-        <section className="profile-section">
-          <h3>
-            <Brain size={14} /> MEMORY
-          </h3>
+        <section>
+          <h3>MEMORY</h3>
           {memory.length ? (
-            memory.map((m) => <p key={m.id}>{m.content}</p>)
+            memory.map((entry) => <p key={entry.id}>{entry.content}</p>)
           ) : (
-            <div className="memory-empty">
-              <Brain size={22} />
-              <strong>{memoryError ? 'Memory unavailable' : 'A fresh mind, for now'}</strong>
-              <p>
-                {memoryError
-                  ? 'Try opening this profile again.'
-                  : 'Long-term memories and learnings are coming in a future phase.'}
-              </p>
-            </div>
+            <p className="dim">No memory entries. Persistent learning is not connected.</p>
           )}
         </section>
+        <section>
+          <h3>MANAGE</h3>
+          {confirm ? (
+            <div>
+              <p>
+                Dismiss {agent.handle}? Assigned tasks and its DM history will be deleted. Shared
+                channel messages are retained.
+              </p>
+              <div className="pane-actions">
+                <button className="danger" onClick={() => void dismiss()}>
+                  [confirm dismiss]
+                </button>
+                <button onClick={() => setConfirm(false)}>[cancel]</button>
+              </div>
+            </div>
+          ) : (
+            <button className="danger" onClick={() => setConfirm(true)}>
+              [dismiss agent]
+            </button>
+          )}
+        </section>
+        {error && (
+          <p className="form-error" role="alert">
+            {error}
+          </p>
+        )}
       </div>
     </aside>
   )

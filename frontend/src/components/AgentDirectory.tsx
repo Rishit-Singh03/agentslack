@@ -1,71 +1,74 @@
-import { ArrowUpRight, Bot, Plus } from 'lucide-react'
-import type { Agent } from '../api/types'
-import { AgentAvatar } from './AgentAvatar'
+import type { Agent, Department } from '../api/types'
+import { departmentStyle } from './DepartmentTag'
 
 export function AgentDirectory({
   agents,
+  departments,
   profile,
   hire,
 }: {
   agents: Agent[]
-  profile: (a: Agent) => void
+  departments: Department[]
+  profile: (agent: Agent) => void
   hire: () => void
 }) {
+  const groups = [
+    ...departments.map((department) => ({
+      department,
+      agents: agents.filter((agent) => agent.department_id === department.id),
+    })),
+    {
+      department: undefined,
+      agents: agents.filter(
+        (agent) =>
+          agent.department_id === null ||
+          !departments.some((department) => department.id === agent.department_id),
+      ),
+    },
+  ]
   return (
     <>
       <header className="view-header">
-        <div className="header-title">
-          <Bot size={25} />
-          <div>
-            <h2>Your people. Powered by possibility.</h2>
-            <p>{agents.length} specialists, one shared ambition.</p>
-          </div>
-        </div>
-        <button className="primary-button" onClick={hire}>
-          <Plus size={16} />
-          Hire agent
+        <h1>agents</h1>
+        <span className="topic">
+          {agents.length} registered / {departments.length} departments
+        </span>
+        <button className="header-action" onClick={hire}>
+          [+] hire agent
         </button>
       </header>
       <div className="directory">
-        <span className="eyebrow">SMALL TEAM. BIG IDEAS.</span>
-        <h1>A specialist for every spark.</h1>
-        <p className="directory-description">
-          Meet the minds behind the work. Pick a teammate to see what makes them tick.
-        </p>
-        <div className="agent-grid">
-          {agents.map((a) => (
-            <button className="agent-card" key={a.id} onClick={() => profile(a)}>
-              <div className="agent-card-top">
-                <AgentAvatar agent={a} size={54} />
-                <span className="level-pill">✧ Level {a.level}</span>
-                <ArrowUpRight size={17} />
-              </div>
-              <h2>{a.name}</h2>
-              <p>{a.title}</p>
-              <span className={`role-badge role-${a.role}`}>{a.role}</span>
-              <div className="skill-list">
-                {a.skills.map((s) => (
-                  <span key={s}>{s}</span>
-                ))}
-              </div>
-              <div className="agent-card-footer">
-                <span className={`inline-dot ${a.status}`} />
-                {a.status}
-                <span>{a.xp} XP</span>
-              </div>
-            </button>
-          ))}
-          <button className="agent-card hire-card" onClick={hire}>
-            <span>
-              <Plus size={25} />
-            </span>
-            <h2>Room for one more.</h2>
-            <p>Your next great teammate is an idea away.</p>
-            <strong>
-              Hire an agent <ArrowUpRight size={14} />
-            </strong>
-          </button>
-        </div>
+        {groups.map((group) => (
+          <section className="agent-group" key={group.department?.id ?? 'unassigned'}>
+            <h2 style={departmentStyle(group.department)}>
+              <span className="department-marker" />
+              {group.department?.name ?? 'Unassigned'}{' '}
+              <span className="dim">({group.agents.length})</span>
+            </h2>
+            {group.agents.map((agent) => (
+              <button className="agent-row" key={agent.id} onClick={() => profile(agent)}>
+                <span>
+                  <strong
+                    className="handle department-handle"
+                    style={departmentStyle(group.department)}
+                  >
+                    {agent.handle}
+                  </strong>
+                  <small>{agent.name}</small>
+                </span>
+                <span>
+                  {agent.title}
+                  <small>{agent.skills.join(' / ') || 'No skills set'}</small>
+                </span>
+                <span>
+                  lvl {agent.level} / {agent.xp}xp
+                  <small className={`status ${agent.status}`}>{agent.status}</small>
+                </span>
+              </button>
+            ))}
+            {!group.agents.length && <p className="group-empty">No agents assigned.</p>}
+          </section>
+        ))}
       </div>
     </>
   )

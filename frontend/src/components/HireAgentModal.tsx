@@ -1,9 +1,18 @@
+import { DepartmentSelect } from './DepartmentSelect'
 import { useState, type FormEvent } from 'react'
 import { api } from '../api/client'
-import type { Agent, Role } from '../api/types'
+import type { Agent, Department } from '../api/types'
 import { Modal } from './Modal'
 
-export function HireAgentModal({ close, hired }: { close: () => void; hired: (a: Agent) => void }) {
+export function HireAgentModal({
+  close,
+  hired,
+  departments,
+}: {
+  close: () => void
+  hired: (a: Agent) => void
+  departments: Department[]
+}) {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const submit = async (e: FormEvent<HTMLFormElement>) => {
@@ -18,7 +27,7 @@ export function HireAgentModal({ close, hired }: { close: () => void; hired: (a:
         await api.hire({
           name,
           handle: handle.startsWith('@') ? handle : `@${handle}`,
-          role: String(data.get('role')) as Role,
+          department_id: data.get('department_id') ? Number(data.get('department_id')) : null,
           title: String(data.get('title')).trim(),
           bio: String(data.get('bio')).trim(),
           skills: String(data.get('skills'))
@@ -36,8 +45,8 @@ export function HireAgentModal({ close, hired }: { close: () => void; hired: (a:
   }
   return (
     <Modal
-      title="Meet your next teammate."
-      subtitle="A little more expertise. A whole lot of possibility."
+      title="hire agent"
+      subtitle="Add a specialist using the local stub runtime."
       close={close}
     >
       <form onSubmit={submit}>
@@ -57,28 +66,21 @@ export function HireAgentModal({ close, hired }: { close: () => void; hired: (a:
           </label>
         </div>
         <div className="form-row">
-          <label>
-            Specialty
-            <select name="role">
-              {['frontend', 'backend', 'finance', 'design', 'research', 'ops'].map((r) => (
-                <option key={r}>{r}</option>
-              ))}
-            </select>
-          </label>
+          <DepartmentSelect departments={departments} />
           <label>
             Title
-            <input name="title" required maxLength={150} placeholder="e.g. Frontend engineer" />
+            <input name="title" required maxLength={150} placeholder="e.g. Operations Manager" />
           </label>
         </div>
         <label>
           Skills <span>(comma separated)</span>
-          <input name="skills" placeholder="React, TypeScript, Accessibility" />
+          <input name="skills" placeholder="Planning, Coordination, Reporting" />
         </label>
         <label>
-          A little about them
-          <textarea name="bio" placeholder="What makes this teammate great?" rows={3} />
+          Bio
+          <textarea name="bio" placeholder="Role and responsibilities" rows={3} />
         </label>
-        <div className="modal-note">✧ New agents start at Level 1 with a stub runtime.</div>
+        <div className="modal-note">New agents start at level 1 with 0xp.</div>
         {error && (
           <p role="alert" className="form-error">
             {error}
@@ -89,7 +91,7 @@ export function HireAgentModal({ close, hired }: { close: () => void; hired: (a:
             Cancel
           </button>
           <button className="primary-button" disabled={busy}>
-            {busy ? 'Adding teammate…' : 'Welcome to the team'}
+            {busy ? 'Adding agent...' : 'Hire agent'}
           </button>
         </div>
       </form>

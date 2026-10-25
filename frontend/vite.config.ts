@@ -4,6 +4,9 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   server: {
-    proxy: { '/api': 'http://127.0.0.1:8000', '/ws': { target: 'ws://127.0.0.1:8000', ws: true } },
+    proxy: {
+      '/api': process.env.AGENTSLACK_BACKEND_URL ?? 'http://127.0.0.1:8000',
+      '/ws': { target: process.env.AGENTSLACK_BACKEND_URL ?? 'http://127.0.0.1:8000', ws: true },
+    },
   },
 })

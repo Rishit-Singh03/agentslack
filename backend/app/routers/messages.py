@@ -126,10 +126,10 @@ async def reply(bind, agent_ids: list[int], message_id: int):
                         )
                 except (RuntimeFailure, BudgetError) as exc:
                     failure = f"{agent.handle}: {exc}"
-                except Exception:
+                except Exception as exc:
                     logger.exception("Runtime failed for agent %s", agent.handle)
                     failure = (
-                        f"{agent.handle}: Runtime failed. Check the backend runtime configuration."
+                        f"{agent.handle}: Runtime failed ({type(exc).__name__}). See backend log."
                     )
                 finally:
                     if isinstance(runtime, PiRuntime) and getattr(runtime, "usage", None):

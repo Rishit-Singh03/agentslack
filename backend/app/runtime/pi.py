@@ -1,6 +1,7 @@
 """Chat-only Pi RPC supervision. One API worker; no paid calls outside prompt()."""
 
 import asyncio
+import concurrent.futures
 import contextlib
 import hashlib
 import json
@@ -9,6 +10,7 @@ import os
 import shutil
 import signal
 import subprocess
+import threading
 from contextlib import asynccontextmanager
 from decimal import Decimal
 from pathlib import Path
@@ -177,6 +179,8 @@ def current_context_tokens(stats):
 
 
 class PiProcess:
+    """Threaded pipes work on both Windows selector and proactor event loops."""
+
     def __init__(self):
         self.process = None
         self.reader = None
@@ -185,40 +189,53 @@ class PiProcess:
         self.job = None
         self.responses = {}
         self.events = asyncio.Queue(maxsize=1024)
+        self.loop = None
+        self.stopping = threading.Event()
+        self.stdin_lock = threading.Lock()
+        self.close_lock = asyncio.Lock()
 
-    async def start(self, args, cwd, env):
+    def _spawn(self, args, cwd, env):
         if os.name == "nt":
             options = {
                 "creationflags": subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
             }
         else:
             options = {"start_new_session": True}
-        try:
-            self.process = await asyncio.create_subprocess_exec(
-                *args,
-                cwd=cwd,
-                env=env,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                limit=8 * 1024 * 1024,
-                **options,
-            )
-            if os.name == "nt":
-                from .windows_job import WindowsJob
+        self.process = subprocess.Popen(
+            args,
+            cwd=cwd,
+            env=env,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            **options,
+        )
+        if os.name == "nt":
+            from .windows_job import WindowsJob
 
-                # asyncio retains the Popen child handle; no ambient process lookup is needed.
-                child = self.process._transport.get_extra_info("subprocess")
-                self.job = WindowsJob(child._handle)
-        except OSError as exc:
-            if self.process and self.process.returncode is None:
-                self.process.kill()
-                await self.process.wait()
-            raise RuntimeFailure(
-                "Pi could not start. Check Node and the local runtime installation."
-            ) from exc
-        self.reader = asyncio.create_task(self._read())
-        self.stderr_reader = asyncio.create_task(self._drain_stderr())
+            self.job = WindowsJob(self.process._handle)
+
+    async def start(self, args, cwd, env):
+        self.loop = asyncio.get_running_loop()
+        spawn = asyncio.create_task(asyncio.to_thread(self._spawn, args, cwd, env))
+        try:
+            # Cancellation must not leave a child created by an unfinished spawn thread.
+            await asyncio.shield(spawn)
+        except BaseException as exc:
+            with contextlib.suppress(Exception):
+                await spawn
+            await self.close()
+            if isinstance(exc, OSError):
+                raise RuntimeFailure(
+                    "Pi could not start. Check Node and the local runtime installation."
+                ) from exc
+            raise
+        self.reader = threading.Thread(target=self._read, name="pi-stdout", daemon=True)
+        self.stderr_reader = threading.Thread(
+            target=self._drain_stderr, name="pi-stderr", daemon=True
+        )
+        self.reader.start()
+        self.stderr_reader.start()
         try:
             event = await asyncio.wait_for(self.events.get(), 30)
             if event.get("type") != "runtime.ready" or event.get("tools") != []:
@@ -231,71 +248,116 @@ class PiProcess:
             await self.close()
             raise
 
-    async def _drain_stderr(self):
+    def _drain_stderr(self):
         # Provider diagnostics may contain secrets. Drain without logging raw data.
-        while await self.process.stderr.read(8192):
+        try:
+            while self.process.stderr.read(8192):
+                pass
+        except OSError:
             pass
 
-    async def _read(self):
+    async def _deliver(self, event):
+        if event.get("type") == "response":
+            future = self.responses.get(event.get("id"))
+            if future and not future.done():
+                future.set_result(event)
+        else:
+            await self.events.put(event)
+
+    def _read(self):
         try:
-            while line := await self.process.stdout.readline():
+            while not self.stopping.is_set():
+                # LF framing, bounded just like the former asyncio StreamReader.
+                line = self.process.stdout.readline(8 * 1024 * 1024 + 1)
+                if not line:
+                    break
+                if len(line) > 8 * 1024 * 1024:
+                    raise ValueError("RPC line too long")
                 event = json.loads(line)
-                if event.get("type") == "response":
-                    future = self.responses.get(event.get("id"))
-                    if future and not future.done():
-                        future.set_result(event)
-                else:
-                    await self.events.put(event)
-        except (ValueError, OSError):
+                # run_coroutine_threadsafe uses loop.call_soon_threadsafe. Waiting for
+                # delivery preserves ordering/backpressure without touching asyncio
+                # queues or futures on this reader thread.
+                delivery = asyncio.run_coroutine_threadsafe(self._deliver(event), self.loop)
+                while True:
+                    try:
+                        delivery.result(timeout=0.1)
+                        break
+                    except concurrent.futures.TimeoutError:
+                        if self.stopping.is_set():
+                            delivery.cancel()
+                            return
+        except (ValueError, OSError, RuntimeError, concurrent.futures.CancelledError):
             pass
         finally:
-            self.exited = True
-            for future in self.responses.values():
-                if not future.done():
-                    future.set_exception(RuntimeFailure("Pi exited or its RPC stream failed."))
-            if self.events.full():
-                self.events.get_nowait()
-            self.events.put_nowait({"type": "runtime.exit"})
+            with contextlib.suppress(RuntimeError):
+                self.loop.call_soon_threadsafe(self._notify_exit)
+
+    def _notify_exit(self):
+        if self.exited:
+            return
+        self.exited = True
+        if self.process:
+            self.process.poll()
+        for future in self.responses.values():
+            if not future.done():
+                future.set_exception(RuntimeFailure("Pi exited or its RPC stream failed."))
+        if self.events.full():
+            self.events.get_nowait()
+        self.events.put_nowait({"type": "runtime.exit"})
+
+    def _write(self, data):
+        with self.stdin_lock:
+            if self.stopping.is_set():
+                raise BrokenPipeError("Pi is shutting down")
+            self.process.stdin.write(data)
+            self.process.stdin.flush()
 
     async def command(self, kind, timeout=30, **data):
-        if self.exited or self.process.returncode is not None:
+        if self.exited or self.process.poll() is not None:
             raise RuntimeFailure("Pi exited before completing the reply.")
         identifier = uuid4().hex
         future = asyncio.get_running_loop().create_future()
         self.responses[identifier] = future
         try:
-            self.process.stdin.write(
-                (json.dumps({"id": identifier, "type": kind, **data}) + "\n").encode()
-            )
-            await self.process.stdin.drain()
-            result = await asyncio.wait_for(future, timeout)
+            async with asyncio.timeout(timeout):
+                await asyncio.to_thread(
+                    self._write,
+                    (json.dumps({"id": identifier, "type": kind, **data}) + "\n").encode(),
+                )
+                result = await future
             if not result.get("success"):
                 raise RuntimeFailure(
                     "Pi/provider rejected the request. Check model configuration and credentials."
                 )
             return result.get("data", {})
-        except (BrokenPipeError, ConnectionError, TimeoutError) as exc:
+        except (OSError, ConnectionError, TimeoutError) as exc:
             raise RuntimeFailure("Pi RPC connection failed or timed out.") from exc
         finally:
             self.responses.pop(identifier, None)
 
     async def close(self):
-        if self.job:
-            self.job.close()
-            self.job = None
-        elif self.process and self.process.returncode is None:
-            if os.name == "nt":
-                self.process.kill()
-            else:
-                with contextlib.suppress(ProcessLookupError):
-                    os.killpg(self.process.pid, signal.SIGKILL)
-        if self.process:
-            await asyncio.wait_for(self.process.wait(), 5)
-        for task in (self.reader, self.stderr_reader):
-            if task:
-                task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await task
+        async with self.close_lock:
+            self.stopping.set()
+            if self.job:
+                self.job.close()
+                self.job = None
+            elif self.process and self.process.poll() is None:
+                if os.name == "nt":
+                    self.process.kill()
+                else:
+                    with contextlib.suppress(ProcessLookupError):
+                        os.killpg(self.process.pid, signal.SIGKILL)
+            if self.process:
+                await asyncio.to_thread(self.process.wait, timeout=5)
+            for reader in (self.reader, self.stderr_reader):
+                if reader:
+                    await asyncio.to_thread(reader.join, 5)
+                    if reader.is_alive():
+                        raise RuntimeFailure("Pi pipe reader did not shut down.")
+            if self.process:
+                for pipe in (self.process.stdin, self.process.stdout, self.process.stderr):
+                    pipe.close()
+            self._notify_exit()
 
 
 class AgentSlot:
@@ -369,7 +431,7 @@ class PiSupervisor:
             ).encode()
         ).hexdigest()[:20]
         identity = f"{channel.id}-{identity}"
-        if slot.process and slot.identity == identity and slot.process.process.returncode is None:
+        if slot.process and slot.identity == identity and slot.process.process.poll() is None:
             return slot.process
         if slot.process:
             await slot.process.close()
@@ -590,7 +652,7 @@ class PiRuntime:
             except BaseException as exc:
                 if agent.provider == "relay" and isinstance(exc, TimeoutError):
                     failure = {"kind": "timeout"}
-                if process and process.process.returncode is None:
+                if process and process.process.poll() is None:
                     if usage is None and baseline:
                         with contextlib.suppress(Exception):
                             usage = stats_delta(

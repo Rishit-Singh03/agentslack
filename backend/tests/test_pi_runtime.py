@@ -418,7 +418,67 @@ def test_cleanup_terminates_descendants_holding_rpc_pipes(fake_pi, tmp_path):
         assert event["type"] == "runtime.child"
         await asyncio.wait_for(process.close(), 2)
         assert process.process.returncode is not None
-        assert process.process.stdout.at_eof()
-        assert process.process.stderr.at_eof()
+        assert process.process.stdout.closed
+        assert process.process.stderr.closed
+        assert not process.reader.is_alive()
+        assert not process.stderr_reader.is_alive()
+
+    asyncio.run(run())
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows uvicorn --reload uses a selector loop")
+def test_rpc_reply_on_windows_selector_event_loop(fake_pi, tmp_path):
+    async def run():
+        assert isinstance(asyncio.get_running_loop(), asyncio.SelectorEventLoop)
+        process = pi.PiProcess()
+        try:
+            await process.start(
+                pi.runtime_command(), tmp_path, pi.private_environment(tmp_path, "openai")
+            )
+            await process.command("prompt", message="hello from a selector loop")
+            text = []
+            usage = None
+            async with asyncio.timeout(5):
+                while True:
+                    event = await process.events.get()
+                    if event["type"] == "message_update":
+                        delta = event["assistantMessageEvent"]
+                        if delta["type"] == "text_delta":
+                            text.append(delta["delta"])
+                    elif event["type"] == "message_end":
+                        usage = event["message"]["usage"]
+                    elif event["type"] == "agent_settled":
+                        break
+            assert "".join(text) == "Hello from the fake."
+            assert usage["totalTokens"] == 125
+            stats = await asyncio.gather(*(process.command("get_session_stats") for _ in range(4)))
+            assert all(item["assistantMessages"] == 1 for item in stats)
+        finally:
+            await process.close()
+        assert not process.reader.is_alive() and not process.stderr_reader.is_alive()
+
+    loop = asyncio.SelectorEventLoop()
+    try:
+        loop.run_until_complete(run())
+        loop.run_until_complete(loop.shutdown_default_executor())
+    finally:
+        loop.close()
+
+
+def test_shutdown_with_full_event_queue(fake_pi, tmp_path):
+    async def run():
+        process = pi.PiProcess()
+        process.events = asyncio.Queue(maxsize=1)
+        await process.start(
+            pi.runtime_command(), tmp_path, pi.private_environment(tmp_path, "openai")
+        )
+        await process.command("prompt", message="fill the event queue")
+        for _ in range(100):
+            if process.events.full():
+                break
+            await asyncio.sleep(0.01)
+        assert process.events.full()
+        await asyncio.wait_for(process.close(), 2)
+        assert not process.reader.is_alive() and not process.stderr_reader.is_alive()
 
     asyncio.run(run())

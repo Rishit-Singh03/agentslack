@@ -135,11 +135,12 @@ def test_busy_agent_and_streaming_channel_cannot_be_deleted(client, db_engine):
     assert client.delete("/api/channels/7").status_code == 409
 
 
-def test_runtime_failure_finishes_stream_and_restores_status(client, monkeypatch):
+@pytest.mark.parametrize("exception_type", [RuntimeError, NotImplementedError])
+def test_runtime_failure_finishes_stream_and_restores_status(client, monkeypatch, exception_type):
     class BrokenRuntime:
         async def stream(self, agent, message, context):
             yield "Partial response"
-            raise RuntimeError("Harness failed")
+            raise exception_type("Harness failed")
 
     monkeypatch.setattr("app.routers.messages.get_runtime", lambda name: BrokenRuntime())
     response = client.post("/api/channels/7/messages", json={"body": "@omar test failure"})
@@ -147,7 +148,8 @@ def test_runtime_failure_finishes_stream_and_restores_status(client, monkeypatch
     messages = client.get("/api/channels/7/messages").json()
     reply = messages[-2]
     assert reply["body"].startswith("Partial response")
-    assert "Runtime failed" in messages[-1]["body"]
+    assert f"Runtime failed ({exception_type.__name__}). See backend log." in messages[-1]["body"]
+    assert "Harness failed" not in messages[-1]["body"]
     assert reply["is_streaming"] is False
     assert client.get("/api/agents/2").json()["status"] == "online"
 

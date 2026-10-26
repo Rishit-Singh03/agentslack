@@ -2,9 +2,20 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import delete, update
 from sqlmodel import Session, select
 
+from ..budget import spend_summary
 from ..db import get_session
 from ..departments import sync_agent_membership
-from ..models import Agent, Channel, ChannelMember, Department, MemoryEntry, Message, Task
+from ..model_catalog import find_model, preset
+from ..models import (
+    Agent,
+    Channel,
+    ChannelMember,
+    Department,
+    MemoryEntry,
+    Message,
+    Organization,
+    Task,
+)
 from ..realtime import manager
 from ..schemas import AgentCreate, AgentPatch
 
@@ -29,7 +40,14 @@ async def create_agent(data: AgentCreate, session: Session = Depends(get_session
         raise HTTPException(409, "Handle already exists")
     if data.department_id is not None:
         require(session, Department, data.department_id)
-    agent = Agent(**data.model_dump())
+    department = session.get(Department, data.department_id) if data.department_id else None
+    org = session.exec(select(Organization)).one()
+    provider, model = preset(department.slug if department else None, org)
+    fields = data.model_dump(exclude_none=True)
+    fields.setdefault("provider", provider)
+    fields.setdefault("model_id", model)
+    agent = Agent(**fields, runtime=data.harness)
+    validate_model(agent.provider, agent.model_id, agent.thinking_level, agent.max_output_tokens)
     session.add(agent)
     session.flush()
     sync_agent_membership(session, agent)
@@ -49,6 +67,29 @@ async def patch_agent(agent_id: int, data: AgentPatch, session: Session = Depend
     agent = require(session, Agent, agent_id)
     previous_department_id = agent.department_id
     changes = data.model_dump(exclude_unset=True, exclude_none=True)
+    if any(
+        key in changes
+        for key in (
+            "harness",
+            "provider",
+            "model_id",
+            "thinking_level",
+            "max_output_tokens",
+            "monthly_budget_usd",
+        )
+    ):
+        from .messages import pending
+
+        if pending.get(agent_id):
+            raise HTTPException(409, "Wait for queued replies before changing employment settings")
+        validate_model(
+            changes.get("provider", agent.provider),
+            changes.get("model_id", agent.model_id),
+            changes.get("thinking_level", agent.thinking_level),
+            changes.get("max_output_tokens", agent.max_output_tokens),
+        )
+    if "harness" in changes:
+        changes["runtime"] = changes["harness"]
     if "department_id" in data.model_fields_set:
         if data.department_id is not None:
             require(session, Department, data.department_id)
@@ -68,6 +109,30 @@ async def patch_agent(agent_id: int, data: AgentPatch, session: Session = Depend
         session.refresh(dm)
         await manager.broadcast("channel.updated", dm)
     return agent
+
+
+def validate_model(provider, model_id, thinking, max_output_tokens=4096):
+    model = find_model(provider, model_id)
+    allowed = model["thinking_levels"] if model else ["off"]
+    if thinking not in allowed:
+        raise HTTPException(422, "Thinking level is not supported by this model")
+    if model and max_output_tokens > model["max_output"]:
+        raise HTTPException(422, "Maximum output tokens exceeds this model's output limit")
+
+
+@router.get("/{agent_id}/spend")
+def agent_spend(agent_id: int, session: Session = Depends(get_session)):
+    agent = require(session, Agent, agent_id)
+    return {**spend_summary(session, agent_id), "budget_usd": str(agent.monthly_budget_usd)}
+
+
+@router.post("/{agent_id}/abort")
+async def abort_agent(agent_id: int, session: Session = Depends(get_session)):
+    from ..runtime.pi import supervisor
+
+    require(session, Agent, agent_id)
+    await supervisor.abort(agent_id)
+    return {"status": "aborted"}
 
 
 @router.get("/{agent_id}/memory", response_model=list[MemoryEntry])

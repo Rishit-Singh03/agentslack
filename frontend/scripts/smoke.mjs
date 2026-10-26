@@ -70,9 +70,13 @@ try {
   )
   const backend = start(
     python,
-    ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', String(backendPort)],
+    ['-m', 'scripts.smoke_server', String(backendPort)],
     path.join(repo, 'backend'),
-    { ...environment, DATABASE_URL: `sqlite:///${database.replaceAll('\\', '/')}` },
+    {
+      ...environment,
+      DATABASE_URL: `sqlite:///${database.replaceAll('\\', '/')}`,
+      SMOKE_RUNTIME_DIR: path.join(temporary, 'runtime'),
+    },
   )
   const vite = start(
     process.execPath,
@@ -105,7 +109,17 @@ try {
   page.on('pageerror', (error) => errors.push(error.message))
   page.setDefaultTimeout(15000)
   const screenshot = async (name) => {
-    if (name === 'settings-dark') await page.setViewportSize({ width: 1440, height: 1720 })
+    if (name === 'settings-dark') {
+      await page.setViewportSize({ width: 1440, height: 2000 })
+      await page.locator('.settings-scroll').evaluate((element) => {
+        element.scrollTop = 0
+      })
+    }
+    if (name === 'settings-models-budget') {
+      await page
+        .getByRole('region', { name: 'Models and budget settings' })
+        .evaluate((element) => element.scrollIntoView({ block: 'start' }))
+    }
     await page.evaluate(() => document.fonts.ready)
     await page.screenshot({
       path: path.join(artifacts, `${name}.png`),
@@ -175,7 +189,7 @@ try {
   await composer.press('Enter')
   await page.getByLabel('Streaming reply').waitFor()
   await page.waitForFunction(
-    () => Array.from(document.querySelectorAll('.message-body')).at(-1)?.textContent.length > 30,
+    () => Array.from(document.querySelectorAll('.message-body')).at(-1)?.textContent.length > 5,
   )
   const partial = await page.locator('.message-body').last().innerText()
   await page.locator('.message .handle').filter({ hasText: '@evan' }).first().click()
@@ -191,7 +205,27 @@ try {
   await page.getByLabel('Streaming reply').waitFor({ state: 'detached' })
   const complete = await page.locator('.message-body').last().innerText()
   assert.ok(complete.length > partial.length)
-  assert.match(complete, /stub reply from Evan/)
+  assert.match(complete, /Hello from the fake \(final\)/)
+  await page.getByRole('region', { name: 'Employment summary' }).waitFor()
+  await screenshot('profile-employment')
+  await page.getByRole('button', { name: '[edit]', exact: true }).click()
+  await page.getByLabel('Monthly salary (USD)', { exact: true }).fill('12')
+  await page.getByLabel('Maximum output tokens', { exact: true }).fill('512')
+  await page.getByLabel('Harness', { exact: true }).selectOption('pi')
+  const employmentSaved = page.waitForResponse(
+    (response) =>
+      response.url().endsWith('/api/agents/6') && response.request().method() === 'PATCH',
+  )
+  await page.getByRole('button', { name: 'Save agent', exact: true }).click()
+  assert.equal((await employmentSaved).status(), 200)
+  assert.equal(
+    (await (await context.request.get(`${apiUrl}/api/agents/6`)).json()).monthly_budget_usd,
+    '12',
+  )
+  assert.equal(
+    (await (await context.request.get(`${apiUrl}/api/agents/6`)).json()).max_output_tokens,
+    512,
+  )
   await page.keyboard.press('Escape')
   await send('/topic Company priorities and shared requests')
   await page.getByText('Company priorities and shared requests', { exact: true }).waitFor()
@@ -270,7 +304,32 @@ try {
   await command('settings')
   await page.getByRole('heading', { name: 'settings', exact: true }).waitFor()
   assert.equal(new URL(page.url()).pathname, '/settings')
+  await page.getByRole('region', { name: 'Models and budget settings' }).waitFor()
+  await page.getByLabel('Organization monthly budget (USD)').fill('150')
+  await page.getByRole('button', { name: 'Save settings', exact: true }).click()
+  await page.getByRole('status').filter({ hasText: 'Saved' }).waitFor()
   await screenshot('settings-dark')
+  await screenshot('settings-models-budget')
+  const modelHelp = page
+    .getByRole('region', { name: 'Models and budget settings' })
+    .locator('.model-help')
+  assert.match(await modelHelp.innerText(), /Reserves up to 4,096 output tokens per reply/)
+  assert.equal(
+    await modelHelp.evaluate((element) => getComputedStyle(element).color),
+    'rgb(138, 138, 138)',
+  )
+  assert.equal(
+    await page
+      .locator('.settings-reference')
+      .evaluate((element) => getComputedStyle(element).position),
+    'sticky',
+  )
+  assert.ok(
+    await page.locator('.settings-reference').evaluate((element) => {
+      const bounds = element.getBoundingClientRect()
+      return bounds.top >= 0 && bounds.top < 150 && bounds.bottom > bounds.top
+    }),
+  )
   const departmentsRegion = page.getByRole('region', { name: 'Departments settings' })
   await departmentsRegion.getByRole('button', { name: '[+ add department]', exact: true }).click()
   await page.getByLabel('Department name', { exact: true }).fill('Facilities')
@@ -367,7 +426,7 @@ try {
   await screenshot('mobile')
   assert.deepEqual(errors, [])
   console.log('settings, socket broadcasts across tabs, paper contrast, shortcuts, mobile: passed')
-  console.log('Browser smoke passed. Nine screenshots saved in frontend/.artifacts.')
+  console.log('Browser smoke passed. Eleven screenshots saved in frontend/.artifacts.')
 } finally {
   await context?.close()
   await Promise.all(

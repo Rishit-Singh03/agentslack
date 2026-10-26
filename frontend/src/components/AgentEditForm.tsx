@@ -2,6 +2,7 @@ import { DepartmentSelect } from './DepartmentSelect'
 import { useState, type FormEvent } from 'react'
 import { api } from '../api/client'
 import type { Agent, Department } from '../api/types'
+import { EmploymentFields, employmentFromForm } from './EmploymentFields'
 
 export function AgentEditForm({
   agent,
@@ -21,6 +22,7 @@ export function AgentEditForm({
     try {
       saved(
         await api.updateAgent(agent.id, {
+          ...employmentFromForm(data),
           name: String(data.get('name')),
           title: String(data.get('title')),
           department_id: data.get('department_id') ? Number(data.get('department_id')) : null,
@@ -69,6 +71,7 @@ export function AgentEditForm({
           {error}
         </p>
       )}
+      <EmploymentFields agent={agent} />
       <button className="primary-button" disabled={busy}>
         Save agent
       </button>

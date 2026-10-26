@@ -7,6 +7,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from app.models import Agent, Message, Organization
 from app.routers.messages import original_status, pending, reply
 from app.runtime import get_runtime
+from app.runtime.pi import RuntimeFailure
 from app.runtime.registry import RUNTIMES
 from app.runtime.stub import StubRuntime
 from app.seed import seed
@@ -158,6 +159,9 @@ def test_overlapping_replies_restore_original_status():
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:
         seed(session)
+        agent = session.get(Agent, 5)
+        agent.harness = "stub"
+        session.add(agent)
         message = Message(channel_id=1, body="@leo hello")
         session.add(message)
         session.commit()
@@ -179,8 +183,8 @@ def test_overlapping_replies_restore_original_status():
 
 def test_runtime_registry_fallback(caplog):
     assert isinstance(get_runtime("stub"), StubRuntime)
-    assert isinstance(get_runtime("unregistered-harness"), StubRuntime)
-    assert "Unknown agent runtime 'unregistered-harness'; falling back to stub" in caplog.text
+    with pytest.raises(RuntimeFailure, match="Unknown harness"):
+        get_runtime("unregistered-harness")
 
 
 @pytest.mark.parametrize("runtime_name", ["test-harness", "unknown-harness"])
@@ -194,15 +198,16 @@ def test_messages_select_agent_runtime(client, db_engine, monkeypatch, caplog, r
     with Session(db_engine) as session:
         agent = session.get(Agent, 2)
         agent.runtime = runtime_name
+        agent.harness = runtime_name
         session.add(agent)
         session.commit()
 
     assert client.post("/api/channels/7/messages", json={"body": "@omar hi"}).status_code == 201
     response = client.get("/api/channels/7/messages").json()[-1]
-    assert response["author_id"] == 2
     if runtime_name == "test-harness":
+        assert response["author_id"] == 2
         assert response["body"] == "Custom harness reply from Omar"
         assert "Unknown agent runtime" not in caplog.text
     else:
-        assert "stub reply from Omar" in response["body"]
-        assert "Unknown agent runtime 'unknown-harness'; falling back to stub" in caplog.text
+        assert response["author_type"] == "system"
+        assert "Unknown harness" in response["body"]

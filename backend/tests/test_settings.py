@@ -144,9 +144,10 @@ def test_runtime_failure_finishes_stream_and_restores_status(client, monkeypatch
     monkeypatch.setattr("app.routers.messages.get_runtime", lambda name: BrokenRuntime())
     response = client.post("/api/channels/7/messages", json={"body": "@omar test failure"})
     assert response.status_code == 201
-    reply = client.get("/api/channels/7/messages").json()[-1]
+    messages = client.get("/api/channels/7/messages").json()
+    reply = messages[-2]
     assert reply["body"].startswith("Partial response")
-    assert "Runtime failed" in reply["body"]
+    assert "Runtime failed" in messages[-1]["body"]
     assert reply["is_streaming"] is False
     assert client.get("/api/agents/2").json()["status"] == "online"
 

@@ -112,7 +112,7 @@ export function Sidebar(p: {
           ))}
         </nav>
         <div className="sidebar-footer">
-          <span>runtime: stub</span>
+          <span>chat workspace</span>
           <button onClick={() => p.navigate('activity')}>[tail -f]</button>
         </div>
       </aside>

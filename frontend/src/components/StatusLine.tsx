@@ -7,6 +7,7 @@ export function StatusLine({
   agents,
   tasks,
   connected,
+  spend,
 }: {
   mode: string
   org: Org
@@ -14,6 +15,7 @@ export function StatusLine({
   agents: Agent[]
   tasks: Task[]
   connected: boolean
+  spend: string
 }) {
   return (
     <footer className="status-line">
@@ -24,6 +26,9 @@ export function StatusLine({
         {agents.length} agents · {agents.filter((agent) => agent.status === 'online').length} online
       </span>
       <span>{tasks.filter((task) => task.status === 'in_progress').length} tasks in progress</span>
+      <span className="org-spend">
+        ${Number(spend).toFixed(4)} / ${org.org_monthly_budget_usd} this month
+      </span>
       <span className={connected ? 'ok' : 'warn'}>
         {connected ? '● connected' : '○ disconnected — retrying in 3s'}
       </span>

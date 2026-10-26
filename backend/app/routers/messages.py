@@ -4,10 +4,12 @@ import re
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlmodel import Session, select
 
+from ..budget import BudgetError, spend_summary
 from ..db import get_session
 from ..models import Agent, Channel, Message
 from ..realtime import manager
 from ..runtime import get_runtime
+from ..runtime.pi import PiRuntime, RuntimeFailure
 from ..schemas import MessageCreate
 from .agents import require
 
@@ -45,21 +47,62 @@ async def reply(bind, agent_ids: list[int], message_id: int):
                         ).all()
                     )
                 )
-                runtime = get_runtime(agent.runtime)
+                context = [Message.model_validate(item.model_dump()) for item in context]
                 response = Message(
                     channel_id=message.channel_id,
                     author_type="agent",
                     author_id=agent.id,
                     body="",
                     is_streaming=True,
+                    model_id=agent.model_id if agent.harness == "pi" else None,
                     thread_parent_id=message.thread_parent_id,
                 )
                 session.add(response)
                 session.commit()
                 session.refresh(response)
                 await manager.broadcast("message.created", response)
+                runtime = None
+                failure = None
                 try:
-                    if hasattr(runtime, "stream"):
+                    runtime = get_runtime(agent.harness)
+                    if isinstance(runtime, PiRuntime):
+                        # Never keep a write transaction open while Pi runs. In particular,
+                        # lazy-loading an expired agent must not autoflush partial text.
+                        session.refresh(agent)
+                        session.refresh(message)
+                        session.expunge_all()
+                        session.rollback()
+                        async for event in runtime.events(bind, agent, message, context):
+                            if event["type"] == "text":
+                                response.body += event["text"]
+                                await manager.broadcast(
+                                    "message.delta",
+                                    {
+                                        "id": response.id,
+                                        "channel_id": response.channel_id,
+                                        "delta": event["text"],
+                                    },
+                                )
+                            elif event["type"] == "final":
+                                response.body = event["text"]
+                            elif event["type"] == "usage":
+                                response.usage = event["usage"]
+                                response.model_id = event["model_id"]
+                                response.cost_usd = str(event["usage"]["cost"]["total"])
+                            elif event["type"] == "system":
+                                notice = Message(
+                                    channel_id=message.channel_id,
+                                    author_type="system",
+                                    body=event["text"],
+                                )
+                                # A separate short transaction must not attach/flush the
+                                # still-streaming response or expire the run's inputs.
+                                with Session(bind) as notice_session:
+                                    notice_session.add(notice)
+                                    notice_session.commit()
+                                    notice_session.refresh(notice)
+                                    await manager.broadcast("message.created", notice)
+                    elif hasattr(runtime, "stream"):
                         async for chunk in runtime.stream(agent, message, context):
                             response.body += chunk
                             await manager.broadcast(
@@ -81,15 +124,38 @@ async def reply(bind, agent_ids: list[int], message_id: int):
                                 "delta": response.body,
                             },
                         )
+                except (RuntimeFailure, BudgetError) as exc:
+                    failure = f"{agent.handle}: {exc}"
                 except Exception:
                     logger.exception("Runtime failed for agent %s", agent.handle)
-                    response.body += "\n[Runtime failed. Retry the request.]"
+                    failure = (
+                        f"{agent.handle}: Runtime failed. Check the backend runtime configuration."
+                    )
                 finally:
+                    if isinstance(runtime, PiRuntime) and getattr(runtime, "usage", None):
+                        response.usage = runtime.usage
+                        response.model_id = getattr(runtime, "model_id", agent.model_id)
+                        response.cost_usd = str(runtime.usage["cost"]["total"])
+                    if failure and not response.body:
+                        response.author_type = "system"
+                        response.author_id = None
+                        response.body = failure
+                        failure = None
                     response.is_streaming = False
                     session.add(response)
                     session.commit()
                     session.refresh(response)
                     await manager.broadcast("message.created", response)
+                    if failure:
+                        notice = Message(
+                            channel_id=message.channel_id, author_type="system", body=failure
+                        )
+                        session.add(notice)
+                        session.commit()
+                        session.refresh(notice)
+                        await manager.broadcast("message.created", notice)
+                    if isinstance(runtime, PiRuntime):
+                        await manager.broadcast("spend.updated", spend_summary(session))
             finally:
                 active_channels[message.channel_id] -= 1
                 if not active_channels[message.channel_id]:
@@ -97,6 +163,7 @@ async def reply(bind, agent_ids: list[int], message_id: int):
                 pending[agent_id] -= 1
                 if not pending[agent_id]:
                     del pending[agent_id]
+                    agent = session.get(Agent, agent_id)
                     session.refresh(agent)
                     agent.status = original_status.pop(agent_id)
                     session.add(agent)

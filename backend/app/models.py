@@ -1,7 +1,9 @@
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Literal
 
 from sqlalchemy import JSON, Column, String
+from sqlalchemy.types import TypeDecorator
 from sqlmodel import Field, Relationship, SQLModel
 
 
@@ -12,6 +14,17 @@ def now() -> datetime:
 Status = Literal["online", "busy", "idle", "offline"]
 TaskStatus = Literal["todo", "in_progress", "review", "done"]
 Priority = Literal["low", "med", "high"]
+
+
+class DecimalText(TypeDecorator):
+    impl = String
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        return str(value) if value is not None else None
+
+    def process_result_value(self, value, dialect):
+        return Decimal(value) if value is not None else None
 
 
 class Organization(SQLModel, table=True):
@@ -25,6 +38,9 @@ class Organization(SQLModel, table=True):
     font_mode: str = "mixed"
     crt_effects: bool = False
     initialized: bool = False
+    default_provider: str = "openai"
+    default_model_id: str = "gpt-6-luna"
+    org_monthly_budget_usd: Decimal = Field(default=Decimal("100"), sa_type=DecimalText)
 
 
 class UserProfile(SQLModel, table=True):
@@ -58,6 +74,12 @@ class Agent(SQLModel, table=True):
     skills: list[str] = Field(default_factory=list, sa_column=Column(JSON))
     bio: str = ""
     runtime: str = "stub"
+    harness: str = "pi"
+    provider: str = "openai"
+    model_id: str = "gpt-6-luna"
+    thinking_level: str = "off"
+    max_output_tokens: int = 4096
+    monthly_budget_usd: Decimal = Field(default=Decimal("10"), sa_type=DecimalText)
     created_at: datetime = Field(default_factory=now)
 
 
@@ -82,6 +104,9 @@ class Message(SQLModel, table=True):
     author_id: int | None = Field(default=None, foreign_key="agent.id")
     body: str
     is_streaming: bool = False
+    model_id: str | None = None
+    usage: dict | None = Field(default=None, sa_column=Column(JSON))
+    cost_usd: str | None = None
     thread_parent_id: int | None = Field(default=None, foreign_key="message.id")
     created_at: datetime = Field(default_factory=now)
 
@@ -106,3 +131,19 @@ class MemoryEntry(SQLModel, table=True):
     kind: Literal["fact", "lesson", "preference"] = Field(sa_type=String)
     content: str
     created_at: datetime = Field(default_factory=now)
+
+
+class SpendLedger(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    # Retain accounting when an employee is dismissed.
+    agent_id: int = Field(index=True)
+    channel_id: int
+    run_id: str = Field(unique=True)
+    provider: str
+    model_id: str
+    state: str = "reserved"
+    reserved_usd: str
+    cost_usd: str | None = None
+    usage: dict | None = Field(default=None, sa_column=Column(JSON))
+    pricing: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    created_at: datetime = Field(default_factory=now, index=True)

@@ -2,6 +2,7 @@ from sqlmodel import Session, select
 
 from .catalog import DEPARTMENT_CATALOG
 from .departments import create_department, ensure_org_channels, sync_agent_membership
+from .model_catalog import preset
 from .models import Agent, Channel, Department, Message, Organization, Task
 from .schemas import DepartmentCreate
 
@@ -95,6 +96,7 @@ def seed(session: Session, commit: bool = True):
     departments = {item.slug: item for item in session.exec(select(Department)).all()}
     channels = {item.name: item for item in session.exec(select(Channel)).all()}
     people = {}
+    org = session.exec(select(Organization)).one()
     for name, slug, title, skills, xp in SAMPLE_TEAM:
         department = departments.get(slug)
         if department is None:
@@ -109,6 +111,9 @@ def seed(session: Session, commit: bool = True):
             level=1 + xp // 100,
             status="idle" if slug == "product" else "online",
             bio=f"{title}. Handles {department.name.lower()} work and shared requests.",
+            provider=preset(slug, org)[0],
+            model_id=preset(slug, org)[1],
+            runtime="pi",
         )
         session.add(agent)
         session.flush()

@@ -1,0 +1,84 @@
+{
+  "group_ratio": {
+    "default": 1
+  },
+  "success": true,
+  "usable_group": {
+    "default": "GPT, Claude, Grok, Gemini, DeepSeek, GLM, Kimi, Hy3, MiMo, and MiniMax models automatically use their matching internal pricing group."
+  },
+  "data": [
+    {
+      "billing_expr": "(weekday(\"UTC\") >= 1 && weekday(\"UTC\") <= 5) && ((hour(\"UTC\") >= 1 && hour(\"UTC\") < 4) || (hour(\"UTC\") >= 6 && hour(\"UTC\") < 10)) ? tier(\"peak\", p * 0.30 + c * 1.20 + cr * 0.006) : tier(\"off_peak\", p * 0.15 + c * 0.60 + cr * 0.003)",
+      "billing_mode": "tiered_expr",
+      "billing_multiplier": 2,
+      "cache_ratio": 0.02,
+      "completion_ratio": 4,
+      "context_length": 1000000,
+      "description": "DeepSeek V4.1 Flash 1017, the 2026-10-17 release tuned for DeepSeek Harness. Uses the DeepSeek V4 Flash tariff; this model consumes 2x DeepSeek balance compared with other DeepSeek models.",
+      "enable_groups": [
+        "default"
+      ],
+      "group_ratio": {
+        "default": 0.05
+      },
+      "model_name": "deepseek-v4.1-flash-1017",
+      "model_price": 0,
+      "model_ratio": 0.15,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "openai"
+      ],
+      "vendor_id": 1087
+    },
+    {
+      "billing_expr": "len <= 272000 ? tier(\"short_context\", p * 0.1 + c * 0.5 + cr * 0.01 + cc * 0.125) : tier(\"long_context\", p * 0.2 + c * 0.75 + cr * 0.02 + cc * 0.25)",
+      "billing_mode": "tiered_expr",
+      "billing_multiplier": 4,
+      "cache_ratio": 0.1,
+      "completion_ratio": 5,
+      "context_length": 1050000,
+      "create_cache_ratio": 1.25,
+      "enable_groups": [
+        "default"
+      ],
+      "group_ratio": {
+        "default": 0.02
+      },
+      "model_name": "gpt-6-luna",
+      "model_price": 0,
+      "model_ratio": 0.05,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "openai"
+      ],
+      "vendor_id": 1
+    },
+    {
+      "billing_expr": "len <= 100000 ? tier(\"short_context\", p * 0.1 + c * 0.5 + cr * 0.01 + cc * 0.125 + cc1h * 0.2) : tier(\"long_context\", p * 0.5 + c * 2.5 + cr * 0.05 + cc * 0.625 + cc1h * 1)",
+      "billing_mode": "tiered_expr",
+      "cache_ratio": 0.1,
+      "completion_ratio": 5,
+      "context_length": 1000000,
+      "create_cache_ratio": 1.25,
+      "enable_groups": [
+        "default"
+      ],
+      "group_ratio": {
+        "default": 0.036
+      },
+      "icon": "Claude.Color",
+      "model_name": "claude-haiku-5-5",
+      "model_price": 0,
+      "model_ratio": 0.05,
+      "owner_by": "",
+      "quota_type": 0,
+      "supported_endpoint_types": [
+        "anthropic",
+        "openai"
+      ],
+      "vendor_id": 3
+    }
+  ]
+}

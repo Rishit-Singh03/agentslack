@@ -4,10 +4,12 @@ from fastapi import Depends, FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select
 
+from .budget import recover_reservations
 from .db import create_all, engine, get_session
 from .models import Organization
 from .realtime import manager
 from .routers import agents, channels, departments, messages, settings, tasks
+from .runtime import pi
 
 
 @asynccontextmanager
@@ -15,7 +17,12 @@ async def lifespan(app: FastAPI):
     create_all()
     with Session(engine) as session:
         settings.ensure_settings(session)
-    yield
+        recover_reservations(session)
+    pi.supervisor = pi.PiSupervisor()
+    try:
+        yield
+    finally:
+        await pi.supervisor.close()
 
 
 app = FastAPI(title="agentslack", lifespan=lifespan)

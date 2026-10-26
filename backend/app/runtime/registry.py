@@ -1,19 +1,18 @@
 """Named runtime factories; register future harnesses here without changing routers."""
 
-import logging
 from collections.abc import Callable
 
 from .base import AgentRuntime
+from .pi import PiRuntime, RuntimeFailure
 from .stub import StubRuntime
 
-logger = logging.getLogger(__name__)
-
-RUNTIMES: dict[str, Callable[[], AgentRuntime]] = {"stub": StubRuntime}
+RUNTIMES: dict[str, Callable[[], AgentRuntime]] = {"stub": StubRuntime, "pi": PiRuntime}
 
 
 def get_runtime(name: str) -> AgentRuntime:
     factory = RUNTIMES.get(name)
     if factory is None:
-        logger.warning("Unknown agent runtime %r; falling back to stub", name)
-        factory = RUNTIMES["stub"]
+        raise RuntimeFailure(
+            "Unknown harness. Select pi or the explicit offline stub in Employment."
+        )
     return factory()

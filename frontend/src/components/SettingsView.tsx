@@ -3,6 +3,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { api } from '../api/client'
 import type { Department, Org, UserProfile } from '../api/types'
 import { AppearanceFields } from './AppearanceFields'
+import { ModelsBudgetSettings } from './ModelsBudgetSettings'
 
 export function SettingsView({
   org,
@@ -52,6 +53,9 @@ export function SettingsView({
         density: draft.density,
         font_mode: draft.font_mode,
         crt_effects: draft.crt_effects,
+        default_provider: draft.default_provider,
+        default_model_id: draft.default_model_id,
+        org_monthly_budget_usd: draft.org_monthly_budget_usd,
       })
       const updatedProfile = await api.updateMe({
         display_name: profile.display_name,
@@ -98,6 +102,7 @@ export function SettingsView({
               <p className="dim">slug: {draft.slug} (derived from name on save)</p>
             </section>
             <AppearanceFields org={draft} change={change} />
+            <ModelsBudgetSettings org={draft} change={change} />
             <section className="settings-section">
               <h2>PROFILE</h2>
               <div className="form-row">

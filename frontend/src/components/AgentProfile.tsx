@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import type { Agent, Department, MemoryEntry, Task } from '../api/types'
 import { AgentEditForm } from './AgentEditForm'
+import { EmploymentSummary } from './EmploymentSummary'
 
 export function AgentProfile({
   agent,
@@ -95,8 +96,8 @@ export function AgentProfile({
         <section>
           <h3>ABOUT</h3>
           <p>{agent.bio || 'No bio set.'}</p>
-          <p className="dim">runtime: {agent.runtime}</p>
         </section>
+        {!editing && <EmploymentSummary agent={agent} />}
         <section>
           <h3>PROGRESS</h3>
           <p>

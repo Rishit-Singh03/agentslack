@@ -54,6 +54,21 @@ export function Message({
             ▍
           </span>
         )}
+        {message.author_type === 'agent' && message.model_id && message.usage && (
+          <small className="message-meta dim">
+            {message.model_id} · {message.usage.totalTokens.toLocaleString()} tokens · $
+            {Number(message.cost_usd ?? 0).toFixed(6)}
+            {message.usage.price_basis === 'list' && ' list price · via relay'}
+          </small>
+        )}
+        {message.author_type === 'agent' &&
+          message.model_id &&
+          !message.usage &&
+          !message.is_streaming && (
+            <small className="message-meta dim">
+              {message.model_id} · usage unavailable · reservation held
+            </small>
+          )}
       </div>
     </article>
   )

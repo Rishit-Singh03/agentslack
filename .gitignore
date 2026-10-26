@@ -227,3 +227,5 @@ node_modules/
 agentslack.db
 agentslack.db-*
 .artifacts/
+backend/data/
+.vite/

@@ -1100,6 +1100,11 @@ label select {
   font-size: 11px;
 }
 .settings-reference {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  max-height: calc(100vh - 160px);
+  overflow-y: auto;
   border-left: 1px solid var(--line);
   padding: 0 24px;
 }
@@ -1511,4 +1516,48 @@ label select {
     animation: none !important;
     scroll-behavior: auto !important;
   }
+}
+/* Employment and model controls follow the existing terminal panes. */
+.employment-fields {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  padding: 12px;
+  min-width: 0;
+}
+.employment-fields legend {
+  color: var(--accent-user);
+  padding: 0 6px;
+}
+.model-picker {
+  min-width: 0;
+}
+.model-picker select {
+  width: 100%;
+  text-overflow: ellipsis;
+}
+.model-picker .dim {
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+.settings-form .model-help {
+  color: var(--fg-dim);
+}
+.provider-status {
+  border-block: 1px solid var(--line);
+  padding: 8px 0;
+}
+.provider-status p {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.provider-status small {
+  margin-left: auto;
+  color: var(--fg-dim);
+}
+.message-meta {
+  display: block;
+  margin-top: 6px;
+  font-family: var(--mono);
 }

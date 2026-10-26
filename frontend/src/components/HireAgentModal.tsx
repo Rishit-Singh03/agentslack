@@ -46,7 +46,7 @@ export function HireAgentModal({
   return (
     <Modal
       title="hire agent"
-      subtitle="Add a specialist using the local stub runtime."
+      subtitle="Add a specialist. Model defaults follow the department; edit Employment after hiring."
       close={close}
     >
       <form onSubmit={submit}>

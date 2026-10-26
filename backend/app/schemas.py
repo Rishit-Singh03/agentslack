@@ -1,4 +1,5 @@
 import colorsys
+from decimal import Decimal
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -15,6 +16,16 @@ class AgentCreate(BaseModel):
     avatar_color: str = Field(default="#3ddc84", pattern=r"^#[0-9a-fA-F]{6}$")
     skills: list[str] = Field(default_factory=list)
     bio: str = ""
+    harness: Literal["pi", "stub"] = "pi"
+    provider: Literal["deepseek", "anthropic", "openai", "openrouter", "relay"] | None = None
+    model_id: str | None = Field(
+        default=None, min_length=1, max_length=150, pattern=r"^[a-zA-Z0-9/_.:-]+$"
+    )
+    thinking_level: str = "off"
+    max_output_tokens: int = Field(default=4096, ge=1, le=384_000, strict=True)
+    monthly_budget_usd: Decimal = Field(
+        default=Decimal("10"), ge=0, le=1_000_000, max_digits=16, decimal_places=8
+    )
 
 
 class AgentPatch(BaseModel):
@@ -26,6 +37,16 @@ class AgentPatch(BaseModel):
     skills: list[str] | None = None
     bio: str | None = None
     avatar_color: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+    harness: Literal["pi", "stub"] | None = None
+    provider: Literal["deepseek", "anthropic", "openai", "openrouter", "relay"] | None = None
+    model_id: str | None = Field(
+        default=None, min_length=1, max_length=150, pattern=r"^[a-zA-Z0-9/_.:-]+$"
+    )
+    thinking_level: str | None = None
+    max_output_tokens: int | None = Field(default=None, ge=1, le=384_000, strict=True)
+    monthly_budget_usd: Decimal | None = Field(
+        default=None, ge=0, le=1_000_000, max_digits=16, decimal_places=8
+    )
 
 
 class OrgPatch(BaseModel):
@@ -37,6 +58,15 @@ class OrgPatch(BaseModel):
     density: Literal["compact", "comfortable"] | None = None
     font_mode: Literal["mixed", "mono"] | None = None
     crt_effects: bool | None = None
+    default_provider: Literal["deepseek", "anthropic", "openai", "openrouter", "relay"] | None = (
+        None
+    )
+    default_model_id: str | None = Field(
+        default=None, min_length=1, max_length=150, pattern=r"^[a-zA-Z0-9/_.:-]+$"
+    )
+    org_monthly_budget_usd: Decimal | None = Field(
+        default=None, ge=0, le=10_000_000, max_digits=16, decimal_places=8
+    )
 
 
 class ProfilePatch(BaseModel):

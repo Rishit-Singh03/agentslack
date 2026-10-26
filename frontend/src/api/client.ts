@@ -9,6 +9,8 @@ import type {
   Org,
   Task,
   UserProfile,
+  ModelCatalog,
+  SpendSummary,
 } from './types'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -29,6 +31,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 const post = (body: unknown): RequestInit => ({ method: 'POST', body: JSON.stringify(body) })
 const patch = (body: unknown): RequestInit => ({ method: 'PATCH', body: JSON.stringify(body) })
 export const api = {
+  models: () => request<ModelCatalog>('/models'),
+  agentSpend: (id: number) => request<SpendSummary>(`/agents/${id}/spend`),
+  orgSpend: () => request<SpendSummary>('/org/spend'),
   departments: () => request<Department[]>('/departments'),
   departmentCatalog: () => request<DepartmentTemplate[]>('/departments/catalog'),
   createDepartment: (body: DepartmentDraft) => request<Department>('/departments', post(body)),

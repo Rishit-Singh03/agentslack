@@ -15,6 +15,7 @@ import { useSocket } from './useSocket'
 
 export function useWorkspace() {
   const [org, setOrg] = useState<Org | null>(null)
+  const [orgSpend, setOrgSpend] = useState('0')
   const [me, setMe] = useState<UserProfile | null>(null)
   const [agents, setAgents] = useState<Agent[]>([])
   const [departments, setDepartments] = useState<Department[]>([])
@@ -58,6 +59,7 @@ export function useWorkspace() {
       setChannels(rooms)
       setTasks(work)
       setDepartments(teams)
+      setOrgSpend((await api.orgSpend()).total_usd)
       setChannelId((current) =>
         rooms.some((room) => room.id === current)
           ? current
@@ -185,6 +187,9 @@ export function useWorkspace() {
               ),
             )
           break
+        case 'spend.updated':
+          setOrgSpend(event.data.total_usd)
+          break
       }
     },
     () => {
@@ -242,6 +247,7 @@ export function useWorkspace() {
 
   return {
     org,
+    orgSpend,
     setOrg,
     me,
     setMe,

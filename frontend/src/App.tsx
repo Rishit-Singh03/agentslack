@@ -337,6 +337,7 @@ export default function App() {
         )}
       </div>
       <StatusLine
+        spend={workspace.orgSpend}
         mode={mode}
         org={org}
         view={view === 'channel' ? `#${workspace.channel?.name ?? '-'}` : view}

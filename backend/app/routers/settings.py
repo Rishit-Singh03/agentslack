@@ -3,15 +3,31 @@ import re
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
+from ..budget import spend_summary
 from ..catalog import DEPARTMENT_CATALOG
 from ..db import get_session
 from ..departments import create_department, ensure_org_channels
+from ..model_catalog import public_catalog
 from ..models import Channel, Department, Organization, UserProfile
 from ..realtime import manager
 from ..schemas import DepartmentCreate, OnboardingCreate, OrgPatch, ProfilePatch
 from ..seed import seed
 
 router = APIRouter(prefix="/api", tags=["settings"])
+
+
+@router.get("/models")
+async def models():
+    from ..relay import refresh_pricing
+
+    await refresh_pricing()
+    return public_catalog()
+
+
+@router.get("/org/spend")
+def org_spend(session: Session = Depends(get_session)):
+    item = session.exec(select(Organization)).one()
+    return {**spend_summary(session), "budget_usd": str(item.org_monthly_budget_usd)}
 
 
 def slugify(name: str) -> str:
